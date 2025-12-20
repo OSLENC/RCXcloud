@@ -1,0 +1,31 @@
+# =========================
+# RCXCloud Secure Core
+# Workspace + Crate
+# =========================
+
+[workspace]
+members = ["."]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+authors = ["RCXCloud Contributors"]
+
+# -------------------------
+# Secure Core Crate
+# -------------------------
+
+[package]
+name = "rcxcore"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+# rlib  -> internal Rust usage
+# cdylib -> JNI / Android / FFI
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+zeroize = "1.7"
