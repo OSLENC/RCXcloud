@@ -3,15 +3,6 @@
 # Network & Pairing
 # =========================
 
-[workspace]
-members = ["."]
-resolver = "2"
-
-[workspace.package]
-edition = "2021"
-license = "Apache-2.0"
-authors = ["RCXCloud Contributors"]
-
 # -------------------------
 # Transport Crate
 # -------------------------
