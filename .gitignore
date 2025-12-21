@@ -1,29 +1,9 @@
-# =========================
-# RCXcloud — Global Ignore
-# =========================
-
 # Rust build artifacts
 /target/
 **/target/
 
-# Cargo lockfile (workspace-managed)
-/Cargo.lock
+# Workspace lockfile only at root
+Cargo.lock
 
-# OS / editor junk
+# OS junk
 .DS_Store
-Thumbs.db
-*.swp
-*.swo
-.idea/
-.vscode/
-
-# Python cache
-__pycache__/
-*.pyc
-
-# Android / Gradle
-.gradle/
-build/
-*.apk
-*.aab
-target/
