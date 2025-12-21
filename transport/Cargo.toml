@@ -1,0 +1,34 @@
+# =========================
+# RCXCloud — Transport Layer
+# Network & Pairing
+# =========================
+
+[workspace]
+members = ["."]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+authors = ["RCXCloud Contributors"]
+
+# -------------------------
+# Transport Crate
+# -------------------------
+
+[package]
+name = "rcxtransport"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+# Transport must NEVER see keys
+# It only moves encrypted blobs
+
+tokio = { version = "1.37", features = ["net", "rt-multi-thread"] }
+bytes = "1.6"
+thiserror = "1.0"
