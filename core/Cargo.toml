@@ -3,10 +3,6 @@
 # Workspace + Crate
 # =========================
 
-# -------------------------
-# Secure Core Crate
-# -------------------------
-
 [package]
 name = "rcxcore"
 version = "0.1.0"
@@ -14,9 +10,45 @@ edition = "2021"
 publish = false
 
 [lib]
-# rlib  -> internal Rust usage
+# rlib   -> internal Rust usage
 # cdylib -> JNI / Android / FFI
 crate-type = ["rlib", "cdylib"]
 
+# =========================
+# Dependencies (SECURITY-AUDITED)
+# =========================
+
 [dependencies]
-zeroize = "1.7"
+# Memory safety & zeroization (SINGLE VERSION, FEATURES ENABLED)
+zeroize = { version = "1.7", features = ["zeroize_derive"] }
+
+# Symmetric encryption (AES-256-GCM)
+aes-gcm = { version = "0.10", features = ["aes"] }
+
+# Password / key derivation
+argon2 = { version = "0.5", features = ["zeroize"] }
+
+# Post-quantum-safe ECDH (backup / recovery)
+x25519-dalek = { version = "2.0", features = ["zeroize", "static_secrets"] }
+
+# Key derivation helpers
+hkdf = "0.12"
+
+# Hashing / integrity
+sha2 = "0.10"
+subtle = "2.5"
+
+# OS randomness (Android-safe)
+rand_core = { version = "0.6", features = ["getrandom"] }
+
+# Sealed secret containers (for ciphertext, not keys)
+secrecy = { version = "0.8", features = ["alloc", "zeroize"] }
+
+# =========================
+# Build-time safety (OPTIONAL BUT RECOMMENDED)
+# =========================
+
+[build-dependencies]
+rustc_version = "0.4"
+
+
