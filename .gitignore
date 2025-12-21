@@ -1,16 +1,28 @@
-# Android
-*.apk
-*.aab
-.gradle/
-local.properties
-build/
+# =========================
+# RCXcloud — Global Ignore
+# =========================
 
-# Rust
-target/
+# Rust build artifacts
+/target/
+**/target/
 
-# Python
+# Cargo lockfile (workspace-managed)
+/Cargo.lock
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Python cache
 __pycache__/
 *.pyc
 
-# OS
-.DS_Store
+# Android / Gradle
+.gradle/
+build/
+*.apk
+*.aab

@@ -1,3 +1,7 @@
+#![deny(warnings)]
+#![deny(clippy::all)]
+#![deny(unsafe_code)]
+
 //! RCXCloud Secure Core
 //!
 //! Cryptographic trust anchor.
