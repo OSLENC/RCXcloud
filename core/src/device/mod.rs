@@ -1,2 +1,2 @@
-pub mod registry;
 pub mod fingerprint;
+pub mod registry;

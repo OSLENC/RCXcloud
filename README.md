@@ -1,3 +1,18 @@
+# Secure Core (Trust Anchor)
+
+⚠️ WARNING ⚠️
+
+This directory is SECURITY-CRITICAL.
+
+Public APIs in this directory are FROZEN as of v1.0.
+Any change requires:
+- Security review
+- Version bump
+- Re-audit
+
+DO NOT modify Secure Core APIs without authorization.
+
+
 # RCXCLOUD — SYSTEM ARCHITECTURE
 
 RCXCloud is a **security-first, privacy-preserving, multi-cloud storage and media system** designed with strong cryptographic guarantees, strict layering, and long-term extensibility.

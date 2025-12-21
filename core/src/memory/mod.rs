@@ -1,3 +1,2 @@
-pub mod zeroize;
 pub mod guard;
-
+pub mod zeroize;

@@ -9,12 +9,12 @@
 
 #![forbid(unsafe_code)]
 
-pub mod crypto;
-pub mod keystore;
-pub mod integrity;
-pub mod policy;
-pub mod memory;
-pub mod media;
-pub mod device;
-pub mod kill;
 pub mod bridge;
+pub mod crypto;
+pub mod device;
+pub mod integrity;
+pub mod keystore;
+pub mod kill;
+pub mod media;
+pub mod memory;
+pub mod policy;

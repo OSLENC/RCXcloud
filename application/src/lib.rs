@@ -1,6 +1,6 @@
 pub mod cloud;
-pub mod workflow;
 pub mod session;
+pub mod workflow;
 
 // Application emits events, core handles logging/encryption
 pub trait AppEvent {
