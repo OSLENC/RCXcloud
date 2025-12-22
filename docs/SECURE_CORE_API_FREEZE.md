@@ -51,8 +51,8 @@ No other module may be called from outside Secure Core.
 
 #### Frozen Types
 
-[```rust
-pub struct Core;
+```rust
+[pub struct Core;
 pub struct EncryptResult { pub total_len: usize }
 pub struct VerifyResult(pub bool);
 
