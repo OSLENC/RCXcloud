@@ -550,56 +550,6 @@ Any perceived inconvenience is a deliberate security boundary.
 
 
 
-#### Frozen Types
-
-```rust
-pub struct Core;
-pub struct EncryptResult { pub total_len: usize }
-pub struct VerifyResult(pub bool);
-
-pub enum CoreError {
-    Locked,
-    Killed,
-    InvalidInput,
-    CryptoFailure,
-}
-
-Frozen Operations
-
-impl Core {
-    pub fn new() -> Self;
-
-    pub fn unlock_with_phrase(
-        &self,
-        phrase: Vec<u8>,
-    ) -> Result<(), CoreError>;
-
-    pub fn encrypt_chunk(
-        &self,
-        file_id: u64,
-        cloud_id: u16,
-        chunk: u32,
-        plaintext: &[u8],
-        out: &mut [u8],
-    ) -> Result<EncryptResult, CoreError>;
-
-    pub fn decrypt_chunk(
-        &self,
-        file_id: u64,
-        cloud_id: u16,
-        chunk: u32,
-        ciphertext: &[u8],
-        out: &mut [u8],
-    ) -> Result<VerifyResult, CoreError>;
-
-    pub fn lock(&self);
-
-    pub fn apply_remote_kill(&self, kill_blob: &[u8]);
-
-    pub fn is_killed(&self) -> bool;
-}
-
-No new functions may be added without review.
 
 
 ## UI ROLE (STRICT)
@@ -691,3 +641,54 @@ UI integration tests MUST include:
 > Secure Core is the authority.
 
 ---
+#### Frozen Types
+
+```rust
+pub struct Core;
+pub struct EncryptResult { pub total_len: usize }
+pub struct VerifyResult(pub bool);
+
+pub enum CoreError {
+    Locked,
+    Killed,
+    InvalidInput,
+    CryptoFailure,
+}
+
+Frozen Operations
+
+impl Core {
+    pub fn new() -> Self;
+
+    pub fn unlock_with_phrase(
+        &self,
+        phrase: Vec<u8>,
+    ) -> Result<(), CoreError>;
+
+    pub fn encrypt_chunk(
+        &self,
+        file_id: u64,
+        cloud_id: u16,
+        chunk: u32,
+        plaintext: &[u8],
+        out: &mut [u8],
+    ) -> Result<EncryptResult, CoreError>;
+
+    pub fn decrypt_chunk(
+        &self,
+        file_id: u64,
+        cloud_id: u16,
+        chunk: u32,
+        ciphertext: &[u8],
+        out: &mut [u8],
+    ) -> Result<VerifyResult, CoreError>;
+
+    pub fn lock(&self);
+
+    pub fn apply_remote_kill(&self, kill_blob: &[u8]);
+
+    pub fn is_killed(&self) -> bool;
+}
+
+No new functions may be added without review.
+
