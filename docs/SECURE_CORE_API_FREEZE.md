@@ -640,6 +640,26 @@ UI integration tests MUST include:
 > **If the UI thinks it can fix something, it’s wrong.**  
 > Secure Core is the authority.
 
+## TypeScript / WASM Contract
+
+The Secure Core exposes a language-agnostic WASM interface.
+
+The canonical TypeScript definition file (`secure-core.d.ts`) is:
+- Normative
+- Frozen for v1.0
+- Must match `core/src/bridge/api.rs` exactly
+
+Breaking changes to:
+- method names
+- argument order
+- return types
+- failure semantics
+
+are **FORBIDDEN** without a major version bump.
+
+All UI, plugin, and third-party code MUST consume Secure Core
+through this contract.
+
 ---
 #### Frozen Types
 
