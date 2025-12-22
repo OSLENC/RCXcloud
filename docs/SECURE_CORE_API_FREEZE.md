@@ -1,417 +1,317 @@
+# RCXCloud Secure Core — API Freeze (v1.0)
 
-🔒 RCXCloud Secure Core — API FREEZE (v1.0)
+## STATUS: 🔒 FROZEN
 
-Scope
+This document defines the **frozen public API surface** of the RCXCloud Secure Core.
+Any change to this surface **REQUIRES a formal security review**.
 
-core/memory
-
-core/crypto
-
-core/keystore
-
-core/integrity
-
-
-Audience
-
-Core developers
-
-Security auditors
-
-Future maintainers
-
-External reviewers
-
-
+The Secure Core is a **trust anchor**.
+Its APIs are intentionally small, explicit, and misuse-resistant.
 
 ---
 
-0️⃣ FOUNDATIONAL PRINCIPLE (NON-NEGOTIABLE)
+## CORE PRINCIPLES (NON-NEGOTIABLE)
 
-> Secure Core exists to make insecure behavior impossible by construction.
-
-
-
-Any API change that:
-
-exposes raw secrets
-
-allows alternate crypto paths
-
-weakens kill semantics
-
-introduces optional security
-
-
-BREAKS THE CORE and INVALIDATES AUDITS
-
+- Robust ≠ more code
+- Fewer states, fewer footguns
+- Fail closed, always
+- No soft kill
+- No key material outside Secure Core
+- No crypto in UI / application layers
+- Security over elegance
 
 ---
 
-1️⃣ MEMORY API FREEZE
+## TRUST BOUNDARY
 
-🔐 GuardedBox<T> / GuardedKey32
+The Secure Core owns **all** of the following:
 
-MUST NEVER
+- Cryptographic primitives
+- Key derivation & hierarchy
+- Memory locking & zeroization
+- Session lifecycle
+- Recovery semantics
+- Kill semantics
+- Policy enforcement (capabilities)
 
-Implement Clone, Copy, Debug
-
-Expose raw pointer
-
-Allow stack-backed secrets
-
-Skip mlock / VirtualLock
-
-Allow allocation without zeroization on drop
-
-
-ALLOWED
-
-Borrowing via borrow() / borrow_mut()
-
-Drop-based zeroization only
-
-
-📌 Invariant
-
-> A key must never exist outside locked heap memory.
-
-
-
+Everything outside the Secure Core is **untrusted**.
 
 ---
 
-🔐 Secret<T>
+## FROZEN MODULES (PUBLIC SURFACE)
 
-MUST NEVER
+### 1. `core::bridge::api`
 
-Provide into_inner
+This is the **ONLY supported integration surface** for:
+- UI layers
+- JNI / FFI
+- Plugins (WASM, Python, Swift, etc.)
 
-Implement Clone, Copy, Debug
+No other module may be called from outside Secure Core.
 
-Accept stack arrays like [u8; N]
+#### Frozen Types
 
+```rust
+pub struct Core;
+pub struct EncryptResult { pub total_len: usize }
+pub struct VerifyResult(pub bool);
 
-ALLOWED
-
-Heap-only construction
-
-Scoped borrowing
-
-
-📌 Invariant
-
-> Ownership of secrets must never escape compile-time control.
-
-
-
-
----
-
-2️⃣ CRYPTO API FREEZE
-
-❌ FORBIDDEN FOREVER
-
-encrypt(data, key)
-
-decrypt(data, key)
-
-Caller-supplied nonces
-
-RNG-based nonces
-
-Untyped aad: &[u8]
-
-Returning plaintext on auth failure
-
-Partial decryption output
-
-
-
----
-
-✅ REQUIRED CRYPTO SHAPE
-
-AEAD ONLY
-
-AES-GCM or equivalent
-
-Authenticated encryption mandatory
-
-
-Deterministic Nonces
-
-Derived internally
-
-Based on (file_id, chunk)
-
-No counters
-
-No RNG
-
-
-Typed AAD
-
-struct Aad {
-    file_id: u64,
-    chunk: u32,
-    cloud_id: u16,
-    version: u8,
+pub enum CoreError {
+    Locked,
+    Killed,
+    InvalidInput,
+    CryptoFailure,
 }
 
-📌 Invariant
 
-> If AAD changes, decryption must fail.
+### Frozen Operations 
+
+```rust
+
+impl Core {
+    pub fn new() -> Self;
+
+    pub fn unlock_with_phrase(
+        &self,
+        phrase: Vec<u8>,
+    ) -> Result<(), CoreError>;
+
+    pub fn encrypt_chunk(
+        &self,
+        file_id: u64,
+        cloud_id: u16,
+        chunk: u32,
+        plaintext: &[u8],
+        out: &mut [u8],
+    ) -> Result<EncryptResult, CoreError>;
+
+    pub fn decrypt_chunk(
+        &self,
+        file_id: u64,
+        cloud_id: u16,
+        chunk: u32,
+        ciphertext: &[u8],
+        out: &mut [u8],
+    ) -> Result<VerifyResult, CoreError>;
+
+    pub fn lock(&self);
+
+    pub fn apply_remote_kill(&self, kill_blob: &[u8]);
+
+    pub fn is_killed(&self) -> bool;
+}
+
+No new functions may be added without review.
+
+
+
+---
+
+2. core::crypto
+
+Internal only
+
+Not callable by UI / plugins
+
+APIs frozen internally
+
+No raw primitives exposed
+
+
+
+---
+
+3. core::keystore
+
+Internal authority
+
+Exactly one active session
+
+Unlock ONLY via RecoveryAuthority
+
+Kill is irreversible
+
+
+
+---
+
+4. core::memory
+
+Root of trusted dependency graph
+
+Stack secrets forbidden
+
+Locked heap only for long-lived keys
+
+APIs frozen
+
+
+
+---
+
+RECOVERY STRATEGY GUARANTEE
+
+v1.0 guarantees:
+
+Strategy A (deterministic derived keys) — DEFAULT
+
+Strategy B (random per-file keys + recovery blob) — SUPPORTED
+
+
+Strategy selection is policy-controlled, not UI-controlled.
+
+
+---
+
+WHAT IS EXPLICITLY NOT PART OF v1.0
+
+UI-driven key export
+
+Arbitrary key access
+
+Partial kill
+
+Session cloning
+
+Multi-session keystores
+
+Soft recovery
+
+Debug backdoors
+
+
+
+---
+
+CHANGE CONTROL
+
+Any change to:
+
+core::bridge::api
+
+recovery semantics
+
+kill semantics
+
+memory guarantees
+
+
+Requires:
+
+1. Written security justification
+
+
+2. Threat analysis
+
+
+3. Explicit version bump
 
 
 
 
 ---
 
-🔑 Key Derivation (derive.rs)
+FINAL NOTE
 
-MUST
+This API is intentionally boring.
 
-Use HKDF
-
-Use purpose tags
-
-Be deterministic
-
-Never panic
-
-Return GuardedKey32
-
-
-MUST NEVER
-
-Reuse Purpose values
-
-Reorder Purpose enum
-
-Allow raw key bytes to escape
-
-
-📌 Invariant
-
-> Master key must NEVER encrypt data directly.
-
-
-
+If an API feels “convenient”, it probably does not belong in Secure Core.
 
 ---
 
-3️⃣ KEYSTORE API FREEZE
+# 📐 UI CONTRACT DEFINITION
 
-🔥 Kill Semantics (ABSOLUTE)
-
-GLOBAL_KILLED
-
-Process-lifetime irreversible
-
-Cannot be reset
-
-Must be checked on every operation
-
-
-MUST NEVER
-
-Allow unlock after kill
-
-Allow session reuse
-
-Allow key recovery post-kill
-
-
-📌 Invariant
-
-> Kill means cryptographic death, not logout.
-
-
-
+This defines **what the UI is allowed to do — and nothing more**.
 
 ---
 
-🔐 MasterKeyStore
+## UI ROLE (STRICT)
 
-MUST
+The UI is a **requestor**, never an authority.
 
-Accept ownership of GuardedKey32
-
-Fail closed on mutex poisoning
-
-Provide handle-based access only
-
-
-MUST NEVER
-
-Return raw keys
-
-Implement Debug for secrets
-
-Cache derived keys globally
-
-
+The UI:
+- never holds keys
+- never derives keys
+- never chooses crypto primitives
+- never enforces policy
+- never bypasses Secure Core
 
 ---
 
-🔐 Session
+## UI → SECURE CORE CONTRACT
 
-MUST
+### Allowed UI Actions
 
-Be !Send / !Sync
-
-Zeroize key on drop or kill
-
-Use deterministic nonce
-
-Require typed AAD
-
-Fail on global kill
-
-
-MUST NEVER
-
-Store nonce counters
-
-Expose session keys
-
-Survive kill signal
-
-
+| UI Action | Secure Core Call |
+|---------|------------------|
+Unlock vault | `unlock_with_phrase()` |
+Encrypt file chunk | `encrypt_chunk()` |
+Decrypt file chunk | `decrypt_chunk()` |
+User logout | `lock()` |
+Remote kill received | `apply_remote_kill()` |
+Status check | `is_killed()` |
 
 ---
 
-4️⃣ INTEGRITY API FREEZE
+## UI FAILURE MODEL (MANDATORY)
 
-Hashing
+The UI MUST treat **all failures as non-recoverable by default**.
 
-Hash outputs may be logged
-
-Inputs must never be secrets unless wrapped
-
-
-Verification
-
-Must be constant-time
-
-Must fail closed
-
-Must not panic
-
-
-📌 Invariant
-
-> Integrity failures are authentication failures.
-
-
-
+| Condition | UI Behavior |
+|---------|-------------|
+`CoreError::Killed` | Immediately lock UI, wipe UI state |
+`CoreError::Locked` | Prompt for unlock |
+Any crypto failure | Abort operation, retry later |
+NULL / empty JNI return | Treat as fatal |
 
 ---
 
-5️⃣ ERROR HANDLING RULES (CRITICAL)
+## UI MEMORY RULES
 
-PANIC POLICY
-
-Panic = abort
-
-Abort = security failure
-
-Panic is acceptable only when continuing is unsafe
-
-
-ERROR POLICY
-
-Errors must be explicit
-
-No silent fallback
-
-No recovery after crypto failure
-
-
+- UI buffers are **non-secret**
+- UI must assume Secure Core wipes outputs on failure
+- UI must never cache plaintext
+- UI must zero buffers after use (best effort)
 
 ---
 
-6️⃣ TESTING & TOOLING FREEZE
+## UI STATE MACHINE (SIMPLIFIED)
 
-REQUIRED TESTS
+START ↓ LOCKED ↓ unlock_with_phrase ACTIVE ↓ encrypt / decrypt ACTIVE ↓ lock LOCKED ↓ apply_remote_kill KILLED (TERMINAL)
 
-Decrypt fuzz tests
-
-Tampered AAD rejection
-
-Nonce reuse detection
-
-Kill-after-unlock behavior
-
-Poisoned mutex handling
-
-
-FORBIDDEN
-
-Snapshot tests with secrets
-
-Logging raw buffers
-
-Mock crypto in Secure Core
-
-
+No transitions exist **out of KILLED**.
 
 ---
 
-7️⃣ DOCUMENTATION FREEZE
+## UI PROHIBITIONS (ENFORCED BY DESIGN)
 
-Every Secure Core module MUST document:
+UI MUST NOT:
 
-Trust level
-
-Formal invariants
-
-What MUST NOT be changed
-
-Kill semantics
-
-
+- Retry after kill
+- Attempt alternate crypto
+- Cache session state
+- Implement recovery logic
+- Interpret ciphertext
+- Modify AAD fields
 
 ---
 
-8️⃣ VERSIONING RULE
+## UI TEST REQUIREMENTS
 
-Any change to Secure Core requires:
+UI integration tests MUST include:
 
-1. Security review
-
-
-2. Version bump
-
-
-3. Changelog entry
-
-
-4. Re-audit
-
-
-
-📌 Invariant
-
-> Secure Core is not “iterated”, it is re-certified.
-
-
-
+- Kill during upload
+- Kill during decrypt
+- Unlock after kill (must fail)
+- Chunk replay attempt (must fail)
+- Version mismatch (must fail)
 
 ---
 
-✅ FINAL FREEZE STATUS
+## FINAL UI RULE
 
-Module	Freeze Status
-
-memory	🔒 Frozen
-crypto	🔒 Frozen
-keystore	🔒 Frozen
-integrity	🔒 Frozen
-
-
-RCXCloud Secure Core v1.0 is READY.
-
+> **If the UI thinks it can fix something, it’s wrong.**  
+> Secure Core is the authority.
 
 ---
+
