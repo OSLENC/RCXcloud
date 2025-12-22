@@ -3,31 +3,78 @@
    API FREEZE v1.0
    ============================================================ */
 
+/**
+ * Stable error codes returned by Secure Core.
+ * MUST match CoreError enum in Rust.
+ */
+export enum CoreError {
+  Locked = 1,
+  Killed = 2,
+  InvalidInput = 3,
+  CryptoFailure = 4,
+  IntegrityFailure = 5,
+  Denied = 6,
+}
+
+/**
+ * Result wrapper used by all security-sensitive operations.
+ */
+export type CoreResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: CoreError };
+
+/**
+ * WASM-bound Secure Core handle.
+ *
+ * SECURITY NOTES:
+ * - Thin wrapper over native core
+ * - Kill-aware
+ * - Fail-closed
+ * - No guarantees of availability
+ */
 export class WasmCore {
+  /**
+   * Create a Secure Core instance.
+   *
+   * NOTE:
+   * - Constructor NEVER throws
+   * - All failures are deferred to method calls
+   */
   constructor();
 
   /* ───────────── LIFECYCLE ───────────── */
 
   /**
    * Unlock Secure Core using recovery phrase (Strategy-A).
-   * @param phrase Uint8Array containing phrase bytes
-   * @returns true on success, false otherwise
+   *
+   * SECURITY:
+   * - Phrase is zeroized internally
+   * - Forbidden after kill
    */
-  unlock_with_phrase(phrase: Uint8Array): boolean;
+  unlock_with_phrase(
+    phrase: Uint8Array
+  ): CoreResult<void>;
 
   /**
    * Lock the keystore (local lock).
+   *
+   * NOTE:
+   * - No effect after kill
    */
   lock(): void;
 
   /**
    * Apply irreversible remote kill.
-   * @param blob kill authorization blob
+   *
+   * SECURITY:
+   * - Fire-and-forget
+   * - Process-lifetime irreversible
+   * - All future calls will fail
    */
   apply_remote_kill(blob: Uint8Array): void;
 
   /**
-   * Check if Secure Core is killed.
+   * Check whether Secure Core is killed.
    */
   is_killed(): boolean;
 
@@ -36,59 +83,61 @@ export class WasmCore {
   /**
    * Encrypt a file chunk.
    *
-   * @param file_id Stable file identifier
-   * @param cloud_id Cloud identifier
-   * @param chunk Chunk index
-   * @param plaintext Raw chunk bytes
-   * @returns Ciphertext or null on failure
+   * SECURITY:
+   * - Deterministic nonce
+   * - Typed AAD
+   * - Fail-closed
    */
   encrypt_chunk(
     file_id: bigint,
     cloud_id: number,
     chunk: number,
     plaintext: Uint8Array
-  ): Uint8Array | null;
+  ): CoreResult<Uint8Array>;
 
   /**
-   * Decrypt a file chunk.
+   * Decrypt + authenticate a file chunk.
    *
-   * @param file_id Stable file identifier
-   * @param cloud_id Cloud identifier
-   * @param chunk Chunk index
-   * @param ciphertext Encrypted chunk
-   * @returns Plaintext or null on auth failure
+   * SECURITY:
+   * - Authenticated before plaintext exposure
    */
   decrypt_chunk(
     file_id: bigint,
     cloud_id: number,
     chunk: number,
     ciphertext: Uint8Array
-  ): Uint8Array | null;
+  ): CoreResult<Uint8Array>;
 
   /* ───────────── STRATEGY-B RECOVERY ───────────── */
 
   /**
    * Export Strategy-B recovery blob.
-   * @returns Recovery blob or null
+   *
+   * SECURITY:
+   * - Capability-gated
+   * - Opaque, versioned blob
    */
-  export_recovery_blob(): Uint8Array | null;
+  export_recovery_blob(): CoreResult<Uint8Array>;
 
   /**
    * Import Strategy-B recovery blob.
    *
-   * @param blob Recovery blob
-   * @param password User password bytes
-   * @returns true on success
+   * SECURITY:
+   * - Replaces current session
+   * - Integrity verified
    */
   import_recovery_blob(
     blob: Uint8Array,
     password: Uint8Array
-  ): boolean;
+  ): CoreResult<void>;
 
   /**
-   * Disable Strategy-B recovery permanently.
+   * Permanently disable Strategy-B recovery.
+   *
+   * SECURITY:
+   * - IRREVERSIBLE
    */
-  disable_recovery(): boolean;
+  disable_recovery(): CoreResult<void>;
 
   /**
    * Check if Strategy-B recovery is enabled.
