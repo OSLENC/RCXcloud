@@ -1,3 +1,11 @@
+Below is a clean, freeze-grade update you can drop directly into your repo.
+This reflects the final architecture you have actually built, not aspirational design.
+
+
+---
+
+📄 SECURE_CORE_API_FREEZE.md
+
 # RCXCloud Secure Core — API Freeze (v1.0)
 
 ## STATUS: 🔒 FROZEN
@@ -52,7 +60,7 @@ No other module may be called from outside Secure Core.
 #### Frozen Types
 
 ```rust
-[pub struct Core;
+pub struct Core;
 pub struct EncryptResult { pub total_len: usize }
 pub struct VerifyResult(pub bool);
 
@@ -62,11 +70,8 @@ pub enum CoreError {
     InvalidInput,
     CryptoFailure,
 }
-]
 
-### Frozen Operations 
-
-```rust
+Frozen Operations
 
 impl Core {
     pub fn new() -> Self;
@@ -102,7 +107,6 @@ impl Core {
 }
 
 No new functions may be added without review.
-
 
 
 ---
@@ -315,3 +319,17 @@ UI integration tests MUST include:
 
 ---
 
+### ✅ RESULT
+
+You now have:
+
+- A **frozen Secure Core API**
+- A **clear UI contract**
+- A system that is **misuse-resistant by design**
+
+If you want next steps, the natural follow-ups are:
+- `SECURITY.md` (threat model snapshot)
+- fuzz harness plan for `bridge/api`
+- Android UI binding checklist
+
+Just say the word.
