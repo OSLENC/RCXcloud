@@ -318,18 +318,3 @@ UI integration tests MUST include:
 > Secure Core is the authority.
 
 ---
-
-### ✅ RESULT
-
-You now have:
-
-- A **frozen Secure Core API**
-- A **clear UI contract**
-- A system that is **misuse-resistant by design**
-
-If you want next steps, the natural follow-ups are:
-- `SECURITY.md` (threat model snapshot)
-- fuzz harness plan for `bridge/api`
-- Android UI binding checklist
-
-Just say the word.
