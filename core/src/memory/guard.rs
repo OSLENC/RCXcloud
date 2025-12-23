@@ -1,20 +1,14 @@
 //! Guarded, memory-locked heap allocations (Secure Core).
 //!
-//! This module provides page-locked heap allocations for
-//! long-lived secrets such as encryption keys.
+//! Provides page-locked heap allocations for long-lived secrets.
 //!
-//! ─────────────────────────────────────────────────────────────
 //! FORMAL SECURITY INVARIANTS
-//!
-//! G1. Allocation is heap-only.
-//! G2. Memory is locked (mlock / VirtualLock) or PANIC.
-//! G3. Initialization is zero-copy (no stack intermediates).
-//! G4. Panic during init MUST NOT leak memory.
-//! G5. Memory MUST be zeroized before unlock + dealloc.
-//! G6. No Clone / Copy / Debug.
-//!
-//! Violating any invariant is a CRITICAL SECURITY FAILURE.
-//! ─────────────────────────────────────────────────────────────
+//! G1. Heap-only allocation
+//! G2. Memory is locked (mlock / VirtualLock) or PANIC
+//! G3. No stack copies of secrets
+//! G4. Panic during init MUST NOT leak memory
+//! G5. Zeroize BEFORE unlock + dealloc
+//! G6. No Clone / Copy / Debug
 
 use core::alloc::{Layout, System};
 use core::cell::Cell;
@@ -38,12 +32,12 @@ pub struct GuardedBox<T: Zeroize> {
 }
 
 impl<T: Zeroize> GuardedBox<T> {
-    /// Allocate and initialize a guarded buffer using zero-copy initialization.
+    /// Allocate and initialize guarded memory.
     ///
     /// SECURITY:
     /// - Heap-only
-    /// - No stack copies
     /// - Panic-safe
+    /// - No stack intermediates
     /// - Panics if memory locking fails
     pub fn init_with<F>(initializer: F) -> Self
     where
@@ -53,15 +47,15 @@ impl<T: Zeroize> GuardedBox<T> {
 
         // Allocate raw heap memory
         let raw = unsafe { System.alloc(layout) };
-        let ptr = NonNull::new(raw as *mut T)
+        let raw = NonNull::new(raw as *mut MaybeUninit<T>)
             .expect("GuardedBox allocation failed");
 
-        // Lock memory or panic (fail-closed)
-        Self::lock_or_panic(ptr.as_ptr() as *const u8, layout.size());
+        // Lock memory (fail-closed)
+        Self::lock_or_panic(raw.as_ptr() as *const u8, layout.size());
 
-        // Panic-safety guard
+        // Panic safety guard
         struct InitGuard<T: Zeroize> {
-            ptr: *mut T,
+            ptr: *mut MaybeUninit<T>,
             layout: Layout,
         }
 
@@ -71,11 +65,11 @@ impl<T: Zeroize> GuardedBox<T> {
                     // Best-effort zeroization
                     let bytes = core::slice::from_raw_parts_mut(
                         self.ptr as *mut u8,
-                        core::mem::size_of::<T>(),
+                        self.layout.size(),
                     );
                     bytes.zeroize();
 
-                    // Unlock memory
+                    // Unlock
                     #[cfg(unix)]
                     munlock(self.ptr as *const _, self.layout.size());
                     #[cfg(windows)]
@@ -88,23 +82,21 @@ impl<T: Zeroize> GuardedBox<T> {
         }
 
         let mut guard = InitGuard {
-            ptr: ptr.as_ptr(),
+            ptr: raw.as_ptr(),
             layout,
         };
 
-        // Initialize in place (zero-copy)
+        // Initialize in place
         unsafe {
-            let uninit = guard.ptr as *mut MaybeUninit<T>;
-            let slot = &mut *uninit;
-            let value = slot.write(MaybeUninit::uninit());
-            initializer(value.assume_init_mut());
+            let slot = &mut *guard.ptr;
+            initializer(slot.assume_init_mut());
         }
 
-        // Initialization succeeded — disarm panic guard
+        // Initialization succeeded — disarm guard
         core::mem::forget(guard);
 
         Self {
-            ptr,
+            ptr: unsafe { NonNull::new_unchecked(raw.as_ptr() as *mut T) },
             layout,
             _no_clone_copy: PhantomData,
         }
@@ -170,7 +162,7 @@ impl<T: Zeroize> Drop for GuardedBox<T> {
             // Zeroize contents
             let bytes = core::slice::from_raw_parts_mut(
                 self.ptr.as_ptr() as *mut u8,
-                core::mem::size_of::<T>(),
+                self.layout.size(),
             );
             bytes.zeroize();
 
@@ -187,9 +179,7 @@ pub type GuardedKey32 = GuardedBox<[u8; 32]>;
 impl GuardedKey32 {
     /// Create a zeroed, locked 32-byte key buffer.
     pub fn zeroed() -> Self {
-        Self::init_with(|buf| {
-            buf.fill(0);
-        })
+        Self::init_with(|buf| buf.fill(0))
     }
 }
 

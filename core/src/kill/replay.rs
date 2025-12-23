@@ -1,17 +1,38 @@
-//! Kill-message replay protection.
+//! Kill replay protection.
 //!
-//! Prevents reuse of old or duplicated kill commands.
+//! SECURITY:
+//! - Persistent
+//! - Monotonic
+//! - Fail-closed
 
-use crate::device::fingerprint::device_id;
-use std::sync::Mutex;
+use crate::logging::encrypted::EncryptedLog;
 
-static LAST_KILL_TS: Mutex<u64> = Mutex::new(0);
+#[derive(Clone, Copy)]
+pub struct ReplayToken(u64);
 
-pub fn check_and_update(ts: u64) -> bool {
-    let mut last = LAST_KILL_TS.lock().unwrap();
-    if ts <= *last {
+impl ReplayToken {
+    pub fn from_bytes(b: &[u8]) -> Option<Self> {
+        if b.len() != 8 {
+            return None;
+        }
+        Some(Self(u64::from_be_bytes(b.try_into().ok()?)))
+    }
+}
+
+/// Check and record replay token.
+///
+/// Returns true if fresh.
+pub fn check_and_commit(token: ReplayToken) -> bool {
+    let mut log = match EncryptedLog::open_kill_log() {
+        Ok(l) => l,
+        Err(_) => return false,
+    };
+
+    let last = log.read_u64().unwrap_or(0);
+
+    if token.0 <= last {
         return false;
     }
-    *last = ts;
-    true
+
+    log.write_u64(token.0).is_ok()
 }

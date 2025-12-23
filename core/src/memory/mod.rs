@@ -1,13 +1,14 @@
 //! Memory safety and zeroization foundation (Secure Core).
 //!
 //! This module is the ROOT of the trusted dependency graph.
-//! All cryptography, keystores, and policy enforcement depend on
-//! the guarantees enforced here.
+//! All cryptography, keystores, policy enforcement, and media
+//! pipelines depend on the guarantees enforced here.
 //!
 //! ─────────────────────────────────────────────────────────────
 //! FORMAL SECURITY INVARIANTS (NON-NEGOTIABLE)
 //!
-//! I1. No stack-resident secrets.
+//! I1. Secret CONTENTS must never reside on the stack
+//!     (handles / pointers are permitted).
 //! I2. All secret material MUST be heap-allocated.
 //! I3. All secret material MUST be deterministically zeroized.
 //! I4. Long-lived secrets MUST reside in locked memory.
@@ -22,22 +23,26 @@ pub mod zeroize;
 pub mod guard;
 
 // ─────────────────────────────────────────────────────────────
-// Curated public surface
+// Curated public surface (EXPLICIT EXPORTS ONLY)
 // ─────────────────────────────────────────────────────────────
 //
-// Only export what other layers are allowed to touch.
-// No wildcard exports.
-// No internal helpers exposed.
+// RULES:
+// - No wildcard exports
+// - No stack-backed secret types
+// - No raw pointers
+// - No unsafe memory exposure
 
+// ───── Zeroization utilities (short-lived, non-owning) ─────
 pub use zeroize::{
-    Secret,
-    wipe_bytes,
-    wipe_vec,
+    Secret,      // Heap-backed, ownership-enforced secret
+    wipe_bytes, // For transient buffers only
+    wipe_vec,   // For transient Vec<u8> buffers only
 };
 
+// ───── Guarded allocations (long-lived, locked memory) ─────
 pub use guard::{
-    GuardedBox,
-    GuardedKey32,
+    GuardedBox,    // Page-locked heap allocation
+    GuardedKey32, // Canonical 256-bit secret key
 };
 
 #[cfg(test)]
@@ -51,10 +56,9 @@ mod tests {
     }
 
     #[test]
-    fn secret_vec_is_zeroized_on_drop() {
+    fn secret_vec_is_accessible_and_scoped() {
         let secret = Secret::new(vec![0xAA; 32]);
         assert_eq!(secret.borrow()[0], 0xAA);
-        // Drop happens at end of scope — cannot directly test memory,
-        // but this ensures API usability.
+        // Drop occurs at end of scope; zeroization is guaranteed by Drop.
     }
 }
