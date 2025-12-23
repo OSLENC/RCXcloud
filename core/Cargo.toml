@@ -41,8 +41,6 @@ subtle = "2.5"
 # OS randomness (Android-safe)
 rand_core = { version = "0.6", features = ["getrandom"] }
 
-# Sealed secret containers (for ciphertext, not keys)
-secrecy = { version = "0.8", features = ["alloc", "zeroize"] }
 
 # =========================
 # Build-time safety (OPTIONAL BUT RECOMMENDED)
