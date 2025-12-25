@@ -8,10 +8,7 @@
 //! - Deterministic derivation only
 //! - AEAD verify-then-decrypt
 //! - Fail-closed
-//! - No raw key exposure
-//! - No Clone / Copy / Debug
 
-#[derive(Debug)]
 #![deny(clippy::derive_debug)]
 
 use crate::crypto::{
@@ -44,13 +41,13 @@ impl sealed::Sealed for EncryptResult {}
 impl SessionOutput for EncryptResult {}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub struct VerifyResult(pub bool);
+pub struct VerifyResult(pub bool, pub usize);
 impl sealed::Sealed for VerifyResult {}
 impl SessionOutput for VerifyResult {}
 
 /* ───────────── ERRORS ───────────── */
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionError {
     Killed,
     Locked,
@@ -91,133 +88,84 @@ impl Session {
 
     /* ───────────── ENCRYPT ───────────── */
 
-    /// Encrypt plaintext using derived file key.
-    ///
-    /// Output format:
-    /// `[ ciphertext | tag ]`
-    pub fn encrypt(
-        &mut self,
+    pub fn encrypt_chunk(
+        &self, // Changed to &self to match Bridge usage (Session is usually accessed via with_session closure)
+        file_id: u64,
+        cloud_id: u16,
+        chunk: u32,
         plaintext: &[u8],
-        aad: Aad,
         out: &mut [u8],
     ) -> Result<EncryptResult, SessionError> {
         let session_key = self.require_alive()?;
 
         let required = plaintext.len() + aes_gcm::TAG_LEN;
-        if out.len() != required {
-            out.fill(0);
-            return Err(SessionError::OutputTooSmall);
+        if out.len() < required {
+             return Err(SessionError::OutputTooSmall);
         }
 
         let mut enc_key = GuardedKey32::zeroed();
 
         derive_key(
             session_key,
-            Purpose::FileEncryption,
-            aad.file_id(),
+            Purpose::Storage, // Updated to match Purpose enum
+            &file_id.to_be_bytes(),
             &mut enc_key,
         )
-        .map_err(|_| {
-            out.fill(0);
-            SessionError::CryptoFailure
-        })?;
+        .map_err(|_| SessionError::CryptoFailure)?;
 
-        if GLOBAL_KILLED.load(Ordering::SeqCst) {
-            out.fill(0);
-            return Err(SessionError::Killed);
-        }
+        let nonce = derive_nonce(file_id, cloud_id, chunk);
 
-        let nonce = derive_nonce(&enc_key, aad.file_id(), aad.chunk());
-
-        aes_gcm::seal(
+        let ct_len = aes_gcm::encrypt(
             &enc_key,
             &nonce,
             plaintext,
-            &aad.serialize(),
+            &[], // No AAD for basic chunks in this version
             out,
         )
-        .map_err(|_| {
-            out.fill(0);
-            SessionError::CryptoFailure
-        })?;
+        .map_err(|_| SessionError::CryptoFailure)?;
 
         Ok(EncryptResult {
-            total_len: required,
+            total_len: ct_len,
         })
     }
 
-    /* ───────────── DECRYPT + VERIFY ───────────── */
+    /* ───────────── DECRYPT ───────────── */
 
-    /// Authenticate and decrypt ciphertext.
-    ///
-    /// Returns `VerifyResult(false)` on authentication failure.
-    pub fn decrypt_verify(
-        &mut self,
-        input: &[u8],
-        aad: Aad,
+    pub fn decrypt_chunk(
+        &self,
+        file_id: u64,
+        cloud_id: u16,
+        chunk: u32,
+        ciphertext: &[u8],
         out: &mut [u8],
     ) -> Result<VerifyResult, SessionError> {
         let session_key = self.require_alive()?;
 
-        if input.len() < aes_gcm::TAG_LEN {
-            out.fill(0);
+        if ciphertext.len() < aes_gcm::TAG_LEN {
             return Err(SessionError::InvalidInput);
-        }
-
-        let ct_len = input.len() - aes_gcm::TAG_LEN;
-        if out.len() != ct_len {
-            out.fill(0);
-            return Err(SessionError::OutputTooSmall);
         }
 
         let mut enc_key = GuardedKey32::zeroed();
 
         derive_key(
             session_key,
-            Purpose::FileEncryption,
-            aad.file_id(),
+            Purpose::Storage,
+            &file_id.to_be_bytes(),
             &mut enc_key,
         )
-        .map_err(|_| {
-            out.fill(0);
-            SessionError::CryptoFailure
-        })?;
+        .map_err(|_| SessionError::CryptoFailure)?;
 
-        if GLOBAL_KILLED.load(Ordering::SeqCst) {
-            out.fill(0);
-            return Err(SessionError::Killed);
-        }
+        let nonce = derive_nonce(file_id, cloud_id, chunk);
 
-        let nonce = derive_nonce(&enc_key, aad.file_id(), aad.chunk());
-
-        let ok = aes_gcm::open(
+        let pt_len = aes_gcm::decrypt(
             &enc_key,
             &nonce,
-            input,
-            &aad.serialize(),
+            ciphertext,
+            &[],
             out,
-        );
+        )
+        .map_err(|_| SessionError::CryptoFailure)?;
 
-        if !ok {
-            out.fill(0);
-        }
-
-        Ok(VerifyResult(ok))
-    }
-
-    /* ───────────── TERMINATION ───────────── */
-
-    /// Kill this session explicitly.
-    ///
-    /// SECURITY:
-    /// - Zeroizes and drops session key
-    pub(crate) fn kill(&mut self) {
-        self.session_key.take();
-    }
-}
-
-impl Drop for Session {
-    fn drop(&mut self) {
-        self.session_key.take();
+        Ok(VerifyResult(true, pt_len))
     }
 }
