@@ -1,23 +1,6 @@
 //! Device registry (Secure Core).
 //!
 //! TRUST LEVEL: Secure Core
-//!
-//! PURPOSE:
-//! - Persist stable device identity
-//! - Persist irreversible kill state
-//! - Provide deterministic device identifiers
-//!
-//! AUTHORITATIVE KILL SEMANTICS:
-//! - Device is killed IFF a kill record EXISTS
-//! - Kill state is append-only and irreversible
-//! - Any storage error => FAIL CLOSED (killed)
-//!
-//! SECURITY INVARIANTS:
-//! - No secrets stored
-//! - Identity is fixed-size and overwrite-only
-//! - Kill state is append-only and monotonic
-//! - No panics
-//! - Deterministic decoding
 
 #![deny(clippy::derive_debug)]
 
@@ -27,7 +10,6 @@ use crate::logging::encrypted::EncryptedLog;
 
 /* ───────────── TYPES ───────────── */
 
-/// Persistent device registry (identity + kill marker).
 pub struct DeviceRegistry {
     device_id: [u8; 32],
     fingerprint: DeviceFingerprint,
@@ -46,12 +28,6 @@ pub enum RegistryError {
 impl DeviceRegistry {
     /* ───────────── INITIALIZATION ───────────── */
 
-    /// Load or initialize device registry.
-    ///
-    /// SECURITY:
-    /// - Must be called exactly once at startup
-    /// - Fixed-size identity (40 bytes)
-    /// - Fails closed on corruption or IO error
     pub fn load_or_init(
         device_material: &[u8],
     ) -> Result<Self, RegistryError> {
@@ -59,14 +35,14 @@ impl DeviceRegistry {
             EncryptedLog::open_device_identity()
                 .map_err(|_| RegistryError::Storage)?;
 
-        // ───── Try load existing identity ─────
+        // Try load existing
         if let Some(buf) =
             id_log.read_fixed().map_err(|_| RegistryError::Storage)?
         {
             return Self::decode_identity(&buf);
         }
 
-        // ───── First-time initialization ─────
+        // Initialize new
         let hash = hash_sha256(device_material);
         let fingerprint = DeviceFingerprint::from_material(device_material);
 
@@ -86,13 +62,11 @@ impl DeviceRegistry {
 
     /* ───────────── ACCESSORS ───────────── */
 
-    /// Stable logical device ID (non-secret).
     #[inline(always)]
     pub fn device_id(&self) -> [u8; 32] {
         self.device_id
     }
 
-    /// Stable device fingerprint (non-secret).
     #[inline(always)]
     pub fn device_fingerprint(&self) -> u64 {
         self.fingerprint.as_u64()
@@ -100,29 +74,16 @@ impl DeviceRegistry {
 
     /* ───────────── KILL STATE ───────────── */
 
-    /// Check if device is permanently killed.
-    ///
-    /// SEMANTICS:
-    /// - Killed iff ANY kill record exists
-    /// - Fail-closed on any error
     pub fn is_killed(&self) -> bool {
-        let mut log = match EncryptedLog::open_device_kill_log() {
+        let log = match EncryptedLog::open_device_kill_log() {
             Ok(l) => l,
             Err(_) => return true, // FAIL CLOSED
         };
 
-        match log.has_any_content() {
-            Ok(records) => !records.is_empty(),
-            Err(_) => true, // FAIL CLOSED
-        }
+        // ✅ FIX: has_any_content returns bool directly
+        log.has_any_content()
     }
 
-    /// Permanently mark this device as killed.
-    ///
-    /// SECURITY:
-    /// - Append-only
-    /// - Irreversible
-    /// - Crash-safe
     pub fn mark_this_device_killed(
         &self,
     ) -> Result<(), RegistryError> {
