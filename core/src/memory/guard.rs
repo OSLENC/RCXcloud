@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 //! Guarded, memory-locked heap allocations (Secure Core).
 //!
 //! Provides page-locked heap allocations for long-lived secrets.
