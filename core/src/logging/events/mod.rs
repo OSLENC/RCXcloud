@@ -1,18 +1,10 @@
-// Event-only logging interface.
-// No crypto, no persistence, no secrets.
-// Secure Core owns encryption separately.
 
-#[derive(Debug, Clone)]
-pub enum CoreEvent {
-    Startup,
-    Shutdown,
-    Lock,
-    Unlock,
-    IntegrityFailure,
-    RemoteWipeTriggered,
-    PolicyViolation,
-}
+//! NOTE:
+//! - Data-only
+//! - No execution authority
+//! - Append-only
 
-pub trait EventSink {
-    fn emit(event: CoreEvent);
-}
+#![deny(clippy::derive_debug)]
+
+pub mod kill;
+pub mod device;

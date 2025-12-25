@@ -1,7 +1,16 @@
 # =========================
-# RCXCloud Secure Core
-# Workspace + Crate
+# RCXCloud Secure Core (LOCKED)
 # =========================
+#
+# TRUST LEVEL: Secure Core (Trust Anchor)
+#
+# SECURITY PRINCIPLES:
+# - Minimal dependency surface
+# - Deterministic behavior
+# - Zero-trust, fail-closed
+# - No network / async / cloud crates
+# - Feature-gated integration layers
+# - Freeze-ready
 
 [package]
 name = "rcxcore"
@@ -9,9 +18,12 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+# -------------------------------------------------
+# Crate Types
+# -------------------------------------------------
+# rlib   -> Internal Rust usage
+# cdylib -> JNI / FFI / WASM boundary
 [lib]
-# rlib   -> internal Rust usage
-# cdylib -> JNI / Android / FFI
 crate-type = ["rlib", "cdylib"]
 
 # =========================
@@ -19,36 +31,76 @@ crate-type = ["rlib", "cdylib"]
 # =========================
 
 [dependencies]
-# Memory safety & zeroization (SINGLE VERSION, FEATURES ENABLED)
-zeroize = { version = "1.7", features = ["zeroize_derive"] }
+# ---- Memory & Zeroization (CRITICAL) ----
+zeroize = { version = "1.7", features = ["zeroize_derive", "alloc"] }
 
-# Symmetric encryption (AES-256-GCM)
-aes-gcm = { version = "0.10", features = ["aes"] }
-
-# Password / key derivation
-argon2 = { version = "0.5", features = ["zeroize"] }
-
-# Post-quantum-safe ECDH (backup / recovery)
-x25519-dalek = { version = "2.0", features = ["zeroize", "static_secrets"] }
-
-# Key derivation helpers
-hkdf = "0.12"
-
-# Hashing / integrity
+# ---- Symmetric Crypto & Integrity (CRITICAL) ----
+aes-gcm = { version = "0.10", features = ["aes", "alloc"] }
 sha2 = "0.10"
+hmac = "0.12"
+hkdf = "0.12"
 subtle = "2.5"
 
-# OS randomness (Android-safe)
+# ---- Key Derivation (CRITICAL) ----
+argon2 = { version = "0.5", features = ["zeroize", "alloc"] }
+
+# ---- Optional Crypto (Feature-Gated) ----
+# Used ONLY for pairing / recovery / backup flows
+x25519-dalek = { version = "2.0", features = ["static_secrets", "zeroize"], optional = true }
+
+# ---- OS Randomness ----
+# Used ONLY for:
+# - Admin kill generation
+# - WASM handle entropy
+# - KEM flows
 rand_core = { version = "0.6", features = ["getrandom"] }
 
-# Sealed secret containers (for ciphertext, not keys)
-secrecy = { version = "0.8", features = ["alloc", "zeroize"] }
+# ---- Platform Bindings ----
+# Enabled ONLY when targeting Android
+jni = { version = "0.21", optional = true }
+
+# ---- Media Pipeline (DESKTOP ONLY) ----
+# ffmpeg-next is NEVER built on Android.
+# It is gated by:
+#   - cfg(not(target_os = "android"))
+#   - feature "desktop-media"
+[target.'cfg(not(target_os = "android"))'.dependencies]
+ffmpeg-next = { version = "6.0", default-features = false, optional = true }
 
 # =========================
-# Build-time safety (OPTIONAL BUT RECOMMENDED)
+# Dev Dependencies (TESTING ONLY)
+# =========================
+[dev-dependencies]
+rand = "0.8"
+serial_test = "2.0"
+
+# =========================
+# Feature Gates
 # =========================
 
-[build-dependencies]
-rustc_version = "0.4"
+[features]
+default = []
 
+# Android JNI bridge
+android = ["jni"]
 
+# Desktop-only media pipeline (FFmpeg)
+desktop-media = ["ffmpeg-next"]
+
+# Key Encapsulation / Pairing / Backup
+kem = ["x25519-dalek"]
+
+# Admin-only kill blob generator
+# MUST NEVER be enabled on target devices
+kill-admin = []
+
+# =========================
+# Release Profile (SECURITY)
+# =========================
+
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1
+strip = true
+opt-level = "z"
