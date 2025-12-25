@@ -1,26 +1,30 @@
-
-// core/src/policy/enforcement.rs
-
 //! Policy enforcement engine.
 //!
-//! This module is the FINAL authority on:
-//! - whether an operation is allowed
-//! - whether a device is locked or killed
-//! - when irreversible actions are executed
+//! TRUST LEVEL: Secure Core
+//!
+//! FINAL AUTHORITY ON:
+//! - Permission checks
+//! - Kill authorization (NOT execution)
 //!
 //! SECURITY INVARIANTS:
+//! - Kill overrides ALL permissions
 //! - No soft kill
 //! - No re-unlock after kill
-//! - Kill invalidates device identity permanently
-//! - Enforcement is synchronous and fail-closed
+//! - Kill is process-lifetime irreversible
+//! - Policy NEVER orchestrates kill mechanics
 
-use crate::policy::capability::*;
+use crate::policy::capability::Capability;
 use crate::keystore::KeyStore;
 use crate::device::registry::DeviceRegistry;
-use crate::kill::executor::KillExecutor;
+use crate::kill;
+use crate::keystore::master::GLOBAL_KILLED;
+
+use core::sync::atomic::Ordering;
+
+/* ───────────── OPERATIONS ───────────── */
 
 /// High-level operations gated by policy.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operation {
     Upload,
     Download,
@@ -32,97 +36,96 @@ pub enum Operation {
     IssueKill,
 }
 
-/// Central policy enforcer.
+/* ───────────── CAPABILITY SET ───────────── */
+
+/// Read-only capability set (application supplied).
+///
+/// SECURITY:
+/// - Immutable
+/// - Non-owning
+/// - Cannot be escalated
+pub struct CapabilitySet {
+    caps: &'static [Capability],
+}
+
+impl CapabilitySet {
+    pub const fn new(caps: &'static [Capability]) -> Self {
+        Self { caps }
+    }
+
+    #[inline(always)]
+    pub fn allows(&self, cap: Capability) -> bool {
+        self.caps.iter().any(|c| *c == cap)
+    }
+}
+
+/* ───────────── POLICY ENFORCER ───────────── */
+
+/// Central policy enforcement authority.
+///
+/// SECURITY:
+/// - No cryptography
+/// - No key access
+/// - Kill delegation ONLY
 pub struct PolicyEnforcer<'a> {
     keystore: &'a KeyStore,
     registry: &'a DeviceRegistry,
-    kill_exec: &'a KillExecutor,
+    caps: CapabilitySet,
 }
 
 impl<'a> PolicyEnforcer<'a> {
     pub fn new(
         keystore: &'a KeyStore,
         registry: &'a DeviceRegistry,
-        kill_exec: &'a KillExecutor,
+        caps: CapabilitySet,
     ) -> Self {
         Self {
             keystore,
             registry,
-            kill_exec,
+            caps,
         }
     }
 
-    /// Resolve capabilities for *this device*.
-    ///
-    /// IMPORTANT:
-    /// - A killed device ALWAYS resolves to CAPS_LOCKED
-    /// - Admin is a superset, never a downgrade
-    pub fn resolve_caps(&self) -> &'static CapabilitySet {
-        if self.registry.is_this_device_killed() {
-            return &CAPS_LOCKED;
-        }
-
-        if self.registry.is_this_device_admin() {
-            return &CAPS_ADMIN;
-        }
-
-        &CAPS_STANDARD
-    }
+    /* ───────────── PERMISSION CHECK ───────────── */
 
     /// Check whether an operation is allowed.
+    ///
+    /// SECURITY:
+    /// - Kill state overrides ALL permissions
+    /// - Fail-closed
     pub fn allow(&self, op: Operation) -> bool {
-        let caps = self.resolve_caps();
+        if GLOBAL_KILLED.load(Ordering::SeqCst) || self.registry.is_killed() {
+            return false;
+        }
 
         match op {
-            Operation::Upload =>
-                caps.allows(Capability::Upload),
-
-            Operation::Download =>
-                caps.allows(Capability::Download),
-
-            Operation::Restore =>
-                caps.allows(Capability::Restore),
-
-            Operation::Route =>
-                caps.allows(Capability::RouteContent),
-
-            Operation::ViewStatus =>
-                caps.allows(Capability::ViewStatus),
-
-            Operation::RegisterDevice =>
-                caps.allows(Capability::RegisterDevice),
-
-            Operation::RemoveDevice =>
-                caps.allows(Capability::RemoveDevice),
-
-            Operation::IssueKill =>
-                caps.allows(Capability::IssueKill),
+            Operation::Upload         => self.caps.allows(Capability::Upload),
+            Operation::Download       => self.caps.allows(Capability::Download),
+            Operation::Restore        => self.caps.allows(Capability::Restore),
+            Operation::Route          => self.caps.allows(Capability::RouteContent),
+            Operation::ViewStatus     => self.caps.allows(Capability::ViewStatus),
+            Operation::RegisterDevice => self.caps.allows(Capability::RegisterDevice),
+            Operation::RemoveDevice   => self.caps.allows(Capability::RemoveDevice),
+            Operation::IssueKill      => self.caps.allows(Capability::IssueKill),
         }
     }
 
-    /* ======================
-       HARD KILL ENFORCEMENT
-       ====================== */
+    /* ───────────── HARD KILL ───────────── */
 
-    /// Execute a remote or local kill instruction.
+    /// Execute an irreversible device kill.
     ///
-    /// THIS IS NOT A SOFT KILL.
-    /// THIS CANNOT BE UNDONE.
+    /// SECURITY:
+    /// - Authorization handled here
+    /// - Execution delegated to kill subsystem
+    /// - NEVER RETURNS
     pub fn execute_kill(&self, reason: &str) -> ! {
-        // 1️⃣ Immediately acknowledge execution start (before wipe)
-        self.kill_exec.notify_execution_started(reason);
+        // Authorization check (fail closed)
+        if !self.allow(Operation::IssueKill) {
+            // Unauthorized kill attempt → immediate local kill
+            kill::execute("unauthorized kill attempt");
+        }
 
-        // 2️⃣ Invalidate device in registry (persistent, encrypted)
-        self.registry.mark_this_device_killed();
-
-        // 3️⃣ Wipe all keys (session + root)
-        self.keystore.lock();
-
-        // 4️⃣ Execute irreversible kill sequence
-        self.kill_exec.execute_final();
-
-        // 5️⃣ Never return
-        unreachable!("Killed device must never resume execution");
+        // Delegate full execution
+        kill::execute(reason)
     }
 }
-
