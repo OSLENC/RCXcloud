@@ -5,7 +5,6 @@ use core::sync::atomic::Ordering;
 use crate::keystore::master::GLOBAL_KILLED;
 use crate::keystore::KeyStore;
 use crate::device::registry::DeviceRegistry;
-use crate::plugins;
 use crate::kill::replay::{ReplayToken, check_and_commit};
 
 #[derive(Debug)]
