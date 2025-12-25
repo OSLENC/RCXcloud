@@ -1,23 +1,18 @@
-
 //! Policy engine module.
 //!
 //! TRUST LEVEL: Secure Core
-//!
-//! Defines:
-//! - Capabilities (what is allowed)
-//! - Enforcement (when it is allowed)
 
 pub mod capability;
 pub mod enforcement;
 
 /* ───────────── CURATED EXPORTS ───────────── */
 
-pub use capability::{
-    Capability,
-    CapabilitySet,
-};
+// Capabilities (static concepts)
+pub use capability::Capability;
 
+// Enforcement (runtime logic)
 pub use enforcement::{
+    CapabilitySet,
     PolicyEnforcer,
     Operation,
 };
