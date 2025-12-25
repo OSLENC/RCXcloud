@@ -40,6 +40,7 @@ sha2 = "0.10"
 hmac = "0.12"
 hkdf = "0.12"
 subtle = "2.5"
+libc = "0.2"
 
 # ---- Key Derivation (CRITICAL) ----
 argon2 = { version = "0.5", features = ["zeroize", "alloc"] }
