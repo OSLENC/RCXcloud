@@ -1,42 +1,34 @@
+
+
 //! File chunk encryption pipeline (Secure Core).
 //!
 //! TRUST LEVEL: Secure Core
 //!
-//! FORMAL INVARIANTS:
-//! - No raw crypto primitives exposed
-//! - All encryption goes through Session
-//! - Deterministic nonce + typed AAD only
-//! - Chunk boundaries are explicit
+//! SECURITY INVARIANTS:
+//! - Explicit chunk boundaries
+//! - AEAD format enforced
+//! - Fail-closed on all errors
+//! - Output buffers wiped on failure
 //! - No plaintext persistence
-//! - Fail-closed on any error
 
 #![deny(clippy::derive_debug)]
 
-use crate::crypto::aad::Aad;
-use crate::keystore::session::{Session, SessionError};
-use crate::keystore::session::{EncryptResult, VerifyResult};
+use crate::crypto::aad::{Aad, AAD_VERSION_V1};
+use crate::crypto::aes_gcm::TAG_LEN;
+use crate::keystore::session::{EncryptResult, Session, SessionError, VerifyResult};
 
-/// File identifier (stable, non-secret).
 pub type FileId = u64;
-
-/// Cloud identifier (stable, non-secret).
 pub type CloudId = u16;
 
-/// Versioned encryption format.
-pub const FILE_CRYPTO_VERSION: u8 = 1;
+/// Maximum allowed plaintext chunk size (DoS-safe).
+pub const MAX_CHUNK_SIZE: usize = 4 * 1024 * 1024; // 4 MiB
+
+/* ───────────── ENCRYPT ───────────── */
 
 /// Encrypt a single file chunk.
 ///
-/// INPUT:
-/// - plaintext chunk
-/// - chunk index
-///
-/// OUTPUT:
-/// - ciphertext `[ciphertext | tag]`
-///
-/// SECURITY:
-/// - Nonce is derived internally
-/// - AAD is typed and versioned
+/// Output format:
+/// `[ ciphertext | tag ]`
 pub fn encrypt_chunk(
     session: &mut Session,
     file_id: FileId,
@@ -45,21 +37,46 @@ pub fn encrypt_chunk(
     plaintext: &[u8],
     out: &mut [u8],
 ) -> Result<EncryptResult, SessionError> {
-    let aad = Aad {
-        file_id,
-        chunk: chunk_index,
-        cloud_id,
-        version: FILE_CRYPTO_VERSION,
-    };
+    // ───── Input validation ─────
 
-    session.encrypt(plaintext, aad, out)
+    if plaintext.len() > MAX_CHUNK_SIZE {
+        out.fill(0);
+        return Err(SessionError::InvalidInput);
+    }
+
+    let required_len = plaintext.len() + TAG_LEN;
+    if out.len() != required_len {
+        out.fill(0);
+        return Err(SessionError::OutputTooSmall);
+    }
+
+    let aad = Aad::new(
+        file_id,
+        chunk_index,
+        cloud_id,
+        AAD_VERSION_V1,
+    )
+    .ok_or_else(|| {
+        out.fill(0);
+        SessionError::InvalidInput
+    })?;
+
+    // ───── Encrypt via session ─────
+
+    match session.encrypt(plaintext, aad, out) {
+        Ok(r) => Ok(r),
+        Err(e) => {
+            out.fill(0);
+            Err(e)
+        }
+    }
 }
+
+/* ───────────── DECRYPT ───────────── */
 
 /// Decrypt + verify a single file chunk.
 ///
-/// SECURITY:
-/// - Authentication happens BEFORE plaintext exposure
-/// - Output buffer is zeroed on failure (inside crypto)
+/// Returns VerifyResult(false) on auth failure.
 pub fn decrypt_chunk(
     session: &mut Session,
     file_id: FileId,
@@ -68,12 +85,44 @@ pub fn decrypt_chunk(
     ciphertext: &[u8],
     out: &mut [u8],
 ) -> Result<VerifyResult, SessionError> {
-    let aad = Aad {
-        file_id,
-        chunk: chunk_index,
-        cloud_id,
-        version: FILE_CRYPTO_VERSION,
-    };
+    // ───── Input validation ─────
 
-    session.decrypt_verify(ciphertext, aad, out)
+    if ciphertext.len() < TAG_LEN {
+        out.fill(0);
+        return Err(SessionError::InvalidInput);
+    }
+
+    let ct_len = ciphertext.len() - TAG_LEN;
+
+    if ct_len > MAX_CHUNK_SIZE {
+        out.fill(0);
+        return Err(SessionError::InvalidInput);
+    }
+
+    if out.len() != ct_len {
+        out.fill(0);
+        return Err(SessionError::OutputTooSmall);
+    }
+
+    let aad = Aad::new(
+        file_id,
+        chunk_index,
+        cloud_id,
+        AAD_VERSION_V1,
+    )
+    .ok_or_else(|| {
+        out.fill(0);
+        SessionError::InvalidInput
+    })?;
+
+    // ───── Decrypt via session ─────
+
+    match session.decrypt_verify(ciphertext, aad, out) {
+        Ok(v) => Ok(v),
+        Err(e) => {
+            out.fill(0);
+            Err(e)
+        }
+    }
 }
+
