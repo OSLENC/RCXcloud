@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 //! Android JNI adapter (THIN, SAFE).
 //!
 //! SECURITY:
