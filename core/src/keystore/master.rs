@@ -4,11 +4,10 @@
 
 use crate::memory::GuardedKey32;
 use crate::keystore::recovery::RecoveryAuth;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::AtomicBool; // Removed Ordering unused import
 use std::sync::RwLock;
 
 /// Global kill switch flag.
-/// If true, ALL crypto operations fail immediately.
 pub static GLOBAL_KILLED: AtomicBool = AtomicBool::new(false);
 
 pub struct MasterKeyStore {
@@ -25,7 +24,7 @@ impl MasterKeyStore {
     pub fn unlock(&self, auth: RecoveryAuth) -> Result<(), ()> {
         let mut lock = self.root_key.write().map_err(|_| ())?;
         if lock.is_some() {
-            return Err(()); // Already unlocked
+            return Err(());
         }
         *lock = Some(auth.key);
         Ok(())
@@ -37,11 +36,9 @@ impl MasterKeyStore {
         }
     }
 
-    /// Retrieve a handle to the root key (if unlocked).
-    /// Used by Session to derive ephemeral keys.
     pub fn get_root_key(&self) -> Option<GuardedKey32> {
         let lock = self.root_key.read().ok()?;
-        // Clone the GuardedKey32 (allocates new protected memory)
+        // ✅ FIX: This works now because GuardedBox implements Clone
         lock.as_ref().cloned()
     }
 }
