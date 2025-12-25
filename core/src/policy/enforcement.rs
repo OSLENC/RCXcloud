@@ -122,10 +122,10 @@ impl<'a> PolicyEnforcer<'a> {
         // Authorization check (fail closed)
         if !self.allow(Operation::IssueKill) {
             // Unauthorized kill attempt → immediate local kill
-            kill::execute("unauthorized kill attempt");
+            kill::execute_kill("unauthorized kill attempt");
         }
 
         // Delegate full execution
-        kill::execute(reason)
+        kill::execute_kill(reason)
     }
 }
