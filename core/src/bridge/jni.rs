@@ -4,7 +4,8 @@
 use crate::bridge::api::Core;
 use crate::bridge::error::BridgeError;
 
-use jni::objects::{JByteArray, JClass};
+// ✅ FIX: Import specific items to avoid conflicts
+use jni::objects::{JByteArray, JClass, JObject};
 use jni::sys::{jbyteArray, jint, jlong};
 use jni::JNIEnv;
 
@@ -39,7 +40,6 @@ pub extern "system" fn Java_com_rcxcloud_core_SecureCore_unlockWithPhrase(
             .unlock_with_phrase(phrase)
             .map_err(BridgeError::from)?;
 
-        // ✅ FIX: Explicit type annotation for the result
         Ok::<(), BridgeError>(())
     }));
 
@@ -66,28 +66,75 @@ pub extern "system" fn Java_com_rcxcloud_core_SecureCore_isKilled(_: JNIEnv, _: 
 
 #[no_mangle]
 pub extern "system" fn Java_com_rcxcloud_core_SecureCore_encryptChunk(
-    env: JNIEnv, _: JClass, file_id: jlong, cloud_id: jint, chunk: jint, plaintext: JByteArray
+    env: JNIEnv,
+    _: JClass,
+    file_id: jlong,
+    cloud_id: jint,
+    chunk: jint,
+    plaintext: JByteArray,
 ) -> jbyteArray {
-    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+    // ✅ FIX: Added explicit return type `Option<JByteArray>`
+    let result = panic::catch_unwind(AssertUnwindSafe(|| -> Option<JByteArray> {
         let data = env.convert_byte_array(plaintext).ok()?;
-        let mut out = vec![0u8; data.len() + AEAD_TAG_LEN];
-        core().encrypt_chunk(file_id as u64, cloud_id as u16, chunk as u32, &data, &mut out).ok()?;
+        
+        let required_cap = data.len().checked_add(AEAD_TAG_LEN)?;
+        let mut out = vec![0u8; required_cap];
+
+        core()
+            .encrypt_chunk(
+                file_id as u64, 
+                cloud_id as u16, 
+                chunk as u32, 
+                &data, 
+                &mut out
+            )
+            .ok()?;
+
         env.byte_array_from_slice(&out).ok()
     }));
-    match result { Ok(Some(arr)) => arr.as_raw(), _ => fail_null() }
+
+    match result {
+        Ok(Some(arr)) => arr.as_raw(),
+        _ => fail_null(),
+    }
 }
 
 #[no_mangle]
 pub extern "system" fn Java_com_rcxcloud_core_SecureCore_decryptChunk(
-    env: JNIEnv, _: JClass, file_id: jlong, cloud_id: jint, chunk: jint, ciphertext: JByteArray
+    env: JNIEnv,
+    _: JClass,
+    file_id: jlong,
+    cloud_id: jint,
+    chunk: jint,
+    ciphertext: JByteArray,
 ) -> jbyteArray {
-    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+    // ✅ FIX: Added explicit return type `Option<JByteArray>`
+    let result = panic::catch_unwind(AssertUnwindSafe(|| -> Option<JByteArray> {
         let data = env.convert_byte_array(ciphertext).ok()?;
-        if data.len() < AEAD_TAG_LEN { return None; }
+        if data.len() < AEAD_TAG_LEN {
+            return None;
+        }
+
         let mut out = vec![0u8; data.len() - AEAD_TAG_LEN];
-        let ver = core().decrypt_chunk(file_id as u64, cloud_id as u16, chunk as u32, &data, &mut out).ok()?;
-        if !ver.0 { return None; }
+        let ver = core()
+            .decrypt_chunk(
+                file_id as u64, 
+                cloud_id as u16, 
+                chunk as u32, 
+                &data, 
+                &mut out
+            )
+            .ok()?;
+
+        if !ver.0 {
+            return None;
+        }
+        
         env.byte_array_from_slice(&out).ok()
     }));
-    match result { Ok(Some(arr)) => arr.as_raw(), _ => fail_null() }
+
+    match result {
+        Ok(Some(arr)) => arr.as_raw(),
+        _ => fail_null(),
+    }
 }
