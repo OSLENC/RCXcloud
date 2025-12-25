@@ -4,6 +4,7 @@
 
 pub mod session;
 pub mod recovery;
+pub mod master;
 
 use session::{Session, SessionError, SessionOutput};
 use recovery::RecoveryAuthority;
