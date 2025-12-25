@@ -1,21 +1,20 @@
 //! Secure memory zeroization utilities (Secure Core).
 //!
-//! This module defines the ONLY approved primitives for handling
-//! sensitive material in memory.
+//! THIS MODULE IS A TRUST ANCHOR.
 //!
 //! ─────────────────────────────────────────────────────────────
-//! FORMAL SECURITY INVARIANTS
-//! ─────────────────────────────────────────────────────────────
+//! FORMAL SECURITY INVARIANTS (ENFORCED)
 //!
-//! I1. Secret CONTENTS must never exist on the stack
-//!     (heap handles/pointers are allowed).
-//! I2. Secrets MUST NOT be Clone, Copy, or Debuggable.
-//! I3. Secrets MUST be deterministically zeroized.
-//! I4. Secrets MUST NOT escape ownership control.
-//! I5. Zeroization MUST be explicit or guaranteed by Drop.
-//! I6. Stack-resident secret ARRAYS like `[u8; N]` are forbidden.
+//! I1. Secret CONTENTS must NEVER exist on the stack
+//! I2. Secrets MUST be heap-only
+//! I3. Deterministic zeroization (Drop or explicit)
+//! I4. No Clone / Copy / Debug leakage
+//! I5. Ownership is linear and consuming
+//! I6. Wiped secrets are permanently invalid
 //!
 //! Violation of any invariant is a Secure Core bug.
+
+#![deny(clippy::derive_debug)]
 
 use core::cell::Cell;
 use core::fmt;
@@ -24,129 +23,121 @@ use zeroize::Zeroize;
 
 /* ───────────── LOW-LEVEL WIPE HELPERS ───────────── */
 
-/// Zeroize a mutable byte slice.
+/// Zeroize a transient byte slice.
 ///
-/// Use ONLY for short-lived, non-owning buffers.
-/// Never store long-lived secrets in slices.
+/// SECURITY:
+/// - Use ONLY for short-lived, non-owning buffers
 #[inline]
 pub fn wipe_bytes(buf: &mut [u8]) {
     buf.zeroize();
 }
 
-/// Zeroize a Vec<u8>.
+/// Zeroize and clear a transient Vec<u8>.
 ///
-/// Guarantees:
-/// - contents wiped
-/// - logical length cleared
-///
-/// Capacity may remain allocated — do not reuse for secrets.
+/// SECURITY:
+/// - Capacity may remain allocated
+/// - MUST NOT be reused for secrets
 pub fn wipe_vec(buf: &mut Vec<u8>) {
     buf.zeroize();
     buf.clear();
 }
 
-/// ⚠️ STRONGLY DISCOURAGED
-///
-/// `String` allocations may create allocator copies.
-/// Kept ONLY for legacy / JNI edge cases.
-#[deprecated(
-    since = "0.1.0",
-    note = "Use Vec<u8> + Secret instead. String secrets are unsafe."
-)]
-pub fn wipe_string(s: &mut String) {
-    s.zeroize();
-    s.clear();
-}
-
-/* ───────────── SEALED HEAP-ONLY SECRET TRAIT ───────────── */
+/* ───────────── SEALED HEAP-ONLY TRAIT ───────────── */
 
 mod sealed {
-    pub trait HeapSecret {}
+    pub trait HeapOnly {}
 }
 
-use sealed::HeapSecret;
+use sealed::HeapOnly;
 
-/// Explicit allow-list for heap-backed secrets.
-/// ❌ Do NOT add stack-backed types here.
-impl HeapSecret for Vec<u8> {}
+/// Explicit allow-list: heap-backed only
+impl HeapOnly for Vec<u8> {}
 
-/// Ownership-enforcing wrapper for sensitive material.
+/* ───────────── SECRET TYPE ───────────── */
+
+/// Ownership-enforcing wrapper for sensitive heap material.
 ///
 /// SECURITY GUARANTEES:
-/// - Heap-backed secret contents
-/// - No Clone / Copy
-/// - No Debug leakage
-/// - Deterministic zeroization on Drop
-/// - Ownership does not escape
-#[must_use = "Secrets must be held and explicitly wiped or dropped"]
-pub struct Secret<T: Zeroize + HeapSecret> {
-    inner: T,
-    // Prevent Clone / Copy even if T implements them
-    _no_copy_clone: PhantomData<Cell<()>>,
+/// - Heap-backed only
+/// - Deterministic zeroization
+/// - Linear ownership
+/// - No Clone / Copy / Debug
+#[must_use = "Secrets must be explicitly held or dropped"]
+pub struct Secret<T: Zeroize + HeapOnly> {
+    inner: Option<Box<T>>,
+    _no_clone_copy: PhantomData<Cell<()>>,
 }
 
 impl<T> Secret<T>
 where
-    T: Zeroize + HeapSecret,
+    T: Zeroize + HeapOnly + Default,
 {
-    /// Construct a new heap-backed secret.
-    ///
-    /// ❌ Stack arrays like `[u8; 32]` are rejected at compile time.
-    pub fn new(inner: T) -> Self {
+    /// Take ownership of heap-backed secret material.
+    pub fn new(value: T) -> Self {
         Self {
-            inner,
-            _no_copy_clone: PhantomData,
+            inner: Some(Box::new(value)),
+            _no_clone_copy: PhantomData,
         }
     }
 
-    /// Zero-copy initialization.
+    /// Heap-first initialization.
     ///
     /// SECURITY:
-    /// - Heap allocation only
-    /// - No secret bytes touch the stack
-    pub fn init_with<F>(initializer: F) -> Self
+    /// - Allocation occurs BEFORE initialization
+    /// - No stack-resident secret bytes
+    pub fn init_with<F>(init: F) -> Self
     where
         F: FnOnce(&mut T),
     {
-        let mut inner = T::default();
-        initializer(&mut inner);
+        let mut boxed = Box::new(T::default());
+        init(&mut boxed);
+
         Self {
-            inner,
-            _no_copy_clone: PhantomData,
+            inner: Some(boxed),
+            _no_clone_copy: PhantomData,
         }
     }
 
-    /// Immutable access — KEEP SCOPE MINIMAL.
+    /// Immutable borrow — KEEP SCOPE MINIMAL.
+    #[inline(always)]
     pub fn borrow(&self) -> &T {
-        &self.inner
+        self.inner
+            .as_deref()
+            .expect("Secret already wiped or consumed")
     }
 
-    /// Mutable access — KEEP SCOPE MINIMAL.
+    /// Mutable borrow — KEEP SCOPE MINIMAL.
+    #[inline(always)]
     pub fn borrow_mut(&mut self) -> &mut T {
-        &mut self.inner
+        self.inner
+            .as_deref_mut()
+            .expect("Secret already wiped or consumed")
     }
 
-    /// Explicit immediate zeroization.
+    /// Explicit irreversible wipe.
     ///
-    /// After calling this, the secret is permanently invalid.
+    /// After this call, the secret is permanently invalid.
     pub fn wipe_now(&mut self) {
-        self.inner.zeroize();
+        if let Some(mut boxed) = self.inner.take() {
+            boxed.zeroize();
+        }
     }
 }
 
-impl<T: Zeroize + HeapSecret> Drop for Secret<T> {
+impl<T: Zeroize + HeapOnly> Drop for Secret<T> {
     fn drop(&mut self) {
-        self.inner.zeroize();
+        if let Some(mut boxed) = self.inner.take() {
+            boxed.zeroize();
+        }
     }
 }
 
 /// Prevent accidental logging.
-impl<T: Zeroize + HeapSecret> fmt::Debug for Secret<T> {
+impl<T: Zeroize + HeapOnly> fmt::Debug for Secret<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("<Secret [REDACTED]>")
     }
 }
-
 
 
 
