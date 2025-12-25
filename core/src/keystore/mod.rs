@@ -1,143 +1,78 @@
-//! Secure keystore — SINGLE AUTHORITY.
+//! Keystore state machine.
+//!
+//! TRUST LEVEL: Secure Core
 
 #![deny(clippy::derive_debug)]
 
-pub mod session;
-pub mod recovery;
 pub mod master;
+pub mod recovery;
+pub mod session;
 
-use session::{Session, SessionError, SessionOutput};
-use recovery::RecoveryAuthority;
-
-use std::sync::Mutex;
+use crate::memory::GuardedKey32;
+use master::{MasterKeyStore, GLOBAL_KILLED};
+use recovery::RecoveryAuth;
+use session::{Session, SessionError}; // ✅ FIX: Removed SessionOutput
 use core::sync::atomic::Ordering;
-
-use crate::keystore::master::GLOBAL_KILLED;
-
-/* ───────────── ERROR TYPES ───────────── */
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyStoreError {
     Locked,
-    AlreadyUnlocked,
     Killed,
     Poisoned,
+    AlreadyUnlocked,
     Session(SessionError),
 }
 
-impl From<SessionError> for KeyStoreError {
-    fn from(e: SessionError) -> Self {
-        KeyStoreError::Session(e)
-    }
-}
-
-/* ───────────── INTERNAL STATE ───────────── */
-
-enum State {
-    Locked,
-    Active(Session),
-}
-
-/* ───────────── KEYSTORE ───────────── */
-
+/// The central key management authority.
 pub struct KeyStore {
-    state: Mutex<State>,
+    inner: MasterKeyStore,
 }
 
 impl KeyStore {
     pub fn new() -> Self {
         Self {
-            state: Mutex::new(State::Locked),
+            inner: MasterKeyStore::new(),
         }
     }
 
-    /// Unlock keystore using a recovery authority.
-    ///
-    /// SECURITY:
-    /// - Forbidden after global kill
-    /// - Authority is single-use
-    /// - Mutex poisoning FAILS CLOSED
-    pub fn unlock(&self, auth: RecoveryAuthority) -> Result<(), KeyStoreError> {
+    pub fn unlock(&self, auth: RecoveryAuth) -> Result<(), KeyStoreError> {
         if GLOBAL_KILLED.load(Ordering::SeqCst) {
             return Err(KeyStoreError::Killed);
         }
-
-        let mut g = self.state.lock().map_err(|_| {
-            GLOBAL_KILLED.store(true, Ordering::SeqCst);
-            KeyStoreError::Poisoned
-        })?;
-
-        match *g {
-            State::Locked => {
-                let session_key = auth.consume();
-                *g = State::Active(Session::new(session_key));
-                Ok(())
-            }
-            State::Active(_) => Err(KeyStoreError::AlreadyUnlocked),
-        }
+        self.inner.unlock(auth).map_err(|_| KeyStoreError::Locked)
     }
 
-    /// Execute a cryptographic operation within the active session.
+    pub fn lock(&self) {
+        self.inner.lock();
+    }
+
     pub fn with_session<F, R>(&self, f: F) -> Result<R, KeyStoreError>
     where
-        F: FnOnce(&mut Session) -> Result<R, SessionError>,
-        R: SessionOutput,
+        F: FnOnce(&Session) -> Result<R, SessionError>,
     {
         if GLOBAL_KILLED.load(Ordering::SeqCst) {
             return Err(KeyStoreError::Killed);
         }
 
-        let mut g = self.state.lock().map_err(|_| {
-            GLOBAL_KILLED.store(true, Ordering::SeqCst);
-            KeyStoreError::Poisoned
-        })?;
+        // 1. Get Root Key (fails if locked)
+        let root_key = self.inner.get_root_key().ok_or(KeyStoreError::Locked)?;
 
-        match &mut *g {
-            State::Active(s) => f(s).map_err(KeyStoreError::from),
-            State::Locked => Err(KeyStoreError::Locked),
-        }
+        // 2. Create Ephemeral Session
+        // We clone the guarded key (which is cheap, just a pointer copy of the guard)
+        // or re-wrap the raw bytes. MasterKeyStore::get_root_key returns GuardedKey32.
+        let session = Session::new(root_key);
+
+        // 3. Execute Closure
+        let result = f(&session);
+
+        // 4. Cleanup happens on Drop of Session
+        result.map_err(KeyStoreError::Session)
     }
-
-    /// Local lock (user-initiated).
-    ///
-    /// SECURITY:
-    /// - Explicitly kills active session
-    /// - No effect after global kill
-    pub fn lock(&self) {
-        if GLOBAL_KILLED.load(Ordering::SeqCst) {
-            return;
-        }
-
-        match self.state.lock() {
-            Ok(mut g) => {
-                if let State::Active(ref mut s) = *g {
-                    s.kill();
-                    *g = State::Locked;
-                }
-            }
-            Err(_) => {
-                GLOBAL_KILLED.store(true, Ordering::SeqCst);
-            }
-        }
-    }
-
-    /// 🔥 IRREVERSIBLE CLOUD KILL 🔥
-    ///
-    /// CALLED ONLY AFTER:
-    /// - kill blob verification
-    /// - replay check
-    ///
-    /// This function performs **execution only**.
-    pub(crate) fn apply_verified_kill(&self) {
-        GLOBAL_KILLED.store(true, Ordering::SeqCst);
-
-        if let Ok(mut g) = self.state.lock() {
-            if let State::Active(ref mut s) = *g {
-                s.kill();
-            }
-            *g = State::Locked;
-        }
+    
+    // Helper to wipe keys (used by kill executor)
+    pub fn wipe(&self) {
+        // MasterKeyStore doesn't expose explicit wipe, but lock() 
+        // drops the internal key, effectively wiping it.
+        self.inner.lock();
     }
 }
-
-
