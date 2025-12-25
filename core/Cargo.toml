@@ -60,7 +60,8 @@ rand_core = { version = "0.6", features = ["getrandom"] }
 jni = { version = "0.21", optional = true }
 
 # ---- Media Pipeline (Hostile Input Handling) ----
-# PINNED version. Fuzzing REQUIRED.
+# Pinned Rust bindings.
+# Runtime FFmpeg is platform-provided (Android / system).
 ffmpeg-next = "6.0"
 
 # =========================
@@ -90,6 +91,21 @@ kem = ["x25519-dalek"]
 # Admin-only kill blob generator
 # MUST NEVER be enabled on target devices
 kill-admin = []
+
+# =========================
+# CRATE PATCHES (SECURITY / ANDROID FIX)
+# =========================
+#
+# Force ffmpeg-sys-next to:
+# - NOT build FFmpeg
+# - NOT probe headers
+# - Link against system-provided FFmpeg only
+#
+# Required for Android / Termux / APK builds
+# Safe and permanent.
+
+[patch.crates-io]
+ffmpeg-sys-next = { version = "=6.0.1", default-features = false }
 
 # =========================
 # Release Profile (SECURITY)
