@@ -34,7 +34,7 @@ impl ReplayToken {
 ///
 /// FAIL-CLOSED on any error.
 pub fn check_and_commit(token: ReplayToken) -> bool {
-    let mut log = match EncryptedLog::open_kill_log() {
+    let mut log = match EncryptedLog::open_device_kill_log() {
         Ok(l) => l,
         Err(_) => return false,
     };
