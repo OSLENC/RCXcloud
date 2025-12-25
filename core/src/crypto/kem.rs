@@ -1,3 +1,4 @@
+#![cfg(feature = "kem")]
 //! X25519 + HKDF backup key encapsulation.
 //!
 //! TRUST LEVEL: Secure Core
