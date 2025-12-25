@@ -1,12 +1,28 @@
 # =========================
-# RCXCloud Secure Core
+# RCXCloud Secure Core (LOCKED)
 # =========================
+#
+# TRUST LEVEL: Secure Core (Trust Anchor)
+#
+# SECURITY PRINCIPLES:
+# - Minimal dependency surface
+# - Deterministic behavior
+# - Zero-trust, fail-closed
+# - No network / async / cloud crates
+# - Feature-gated integration layers
+# - Freeze-ready
+
 [package]
 name = "rcxcore"
 version = "0.1.0"
 edition = "2021"
 publish = false
 
+# -------------------------------------------------
+# Crate Types
+# -------------------------------------------------
+# rlib   -> Internal Rust usage
+# cdylib -> JNI / FFI / WASM boundary
 [lib]
 crate-type = ["rlib", "cdylib"]
 
@@ -15,48 +31,73 @@ crate-type = ["rlib", "cdylib"]
 # =========================
 
 [dependencies]
-# ---- Memory & Zeroization ----
+# ---- Memory & Zeroization (CRITICAL) ----
 zeroize = { version = "1.7", features = ["zeroize_derive", "alloc"] }
 
-# ---- Crypto Primitives ----
+# ---- Symmetric Crypto & Integrity (CRITICAL) ----
 aes-gcm = { version = "0.10", features = ["aes", "alloc"] }
 sha2 = "0.10"
-hmac = "0.12"      # ✅ Added (Required by nonce.rs)
+hmac = "0.12"
 hkdf = "0.12"
 subtle = "2.5"
 
-# ---- Key Derivation & Recovery ----
+# ---- Key Derivation (CRITICAL) ----
 argon2 = { version = "0.5", features = ["zeroize", "alloc"] }
-x25519-dalek = { version = "2.0", features = ["static_secrets", "zeroize"] }
+
+# ---- Optional Crypto (Feature-Gated) ----
+# Used ONLY for pairing / recovery / backup flows
+x25519-dalek = { version = "2.0", features = ["static_secrets", "zeroize"], optional = true }
 
 # ---- OS Randomness ----
+# Used ONLY for:
+# - Admin kill generation
+# - WASM handle entropy
+# - KEM flows
 rand_core = { version = "0.6", features = ["getrandom"] }
 
 # ---- Platform Bindings ----
-# Optional: Only enabled via "android" feature
-jni = { version = "0.21", optional = true } # ✅ Added (Required by bridge)
+# Enabled ONLY when targeting Android
+jni = { version = "0.21", optional = true }
 
-# ---- Media Pipeline ----
-# Required for media sanitization
-ffmpeg-next = "6.0" # ✅ Added (Required by media/*)
+# ---- Media Pipeline (Hostile Input Handling) ----
+# PINNED version. Fuzzing REQUIRED.
+ffmpeg-next = "6.0"
 
 # =========================
-# Dev Dependencies (Tests)
+# Dev Dependencies (TESTING ONLY)
 # =========================
 [dev-dependencies]
-rand = "0.8"       # Used in stress tests
+rand = "0.8"
 serial_test = "2.0"
 
 # =========================
-# Features
+# Feature Gates
 # =========================
+#
+# IMPORTANT:
+# - Secure Core has NO default features
+# - All platform / crypto extensions are opt-in
+
 [features]
 default = []
+
+# Android JNI bridge
 android = ["jni"]
+
+# Key Encapsulation / Pairing / Backup
+kem = ["x25519-dalek"]
+
+# Admin-only kill blob generator
+# MUST NEVER be enabled on target devices
 kill-admin = []
+
+# =========================
+# Release Profile (SECURITY)
+# =========================
 
 [profile.release]
 panic = "abort"
 lto = true
 codegen-units = 1
 strip = true
+opt-level = "z"
