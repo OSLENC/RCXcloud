@@ -1,4 +1,5 @@
 #![allow(unsafe_code)]
+#![allow(non_snake_case)]
 
 //! Android JNI adapter (THIN, SAFE).
 //!
@@ -6,8 +7,6 @@
 //! - Panic-safe (never crash JVM)
 //! - Fail-closed on all errors
 //! - No secret material escapes
-
-#![allow(non_snake_case)]
 
 use crate::bridge::api::Core;
 use crate::bridge::error::BridgeError;
@@ -43,6 +42,7 @@ fn fail_null() -> jbyteArray {
     std::ptr::null_mut()
 }
 
+#[allow(dead_code)]
 #[inline(always)]
 fn throw_bridge_error(env: &mut JNIEnv, err: BridgeError) {
     // Simplified error thrower
@@ -54,7 +54,7 @@ fn throw_bridge_error(env: &mut JNIEnv, err: BridgeError) {
 
 #[no_mangle]
 pub extern "system" fn Java_com_rcxcloud_core_SecureCore_unlockWithPhrase(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _: JClass,
     phrase: JByteArray,
 ) -> jint {
@@ -65,7 +65,7 @@ pub extern "system" fn Java_com_rcxcloud_core_SecureCore_unlockWithPhrase(
 
         core()
             .unlock_with_phrase(phrase)
-            .map_err(BridgeError::from)?;
+            .map_err(|e| BridgeError::from(e))?; // ✅ FIX: Explicit closure
 
         Ok(())
     }));
@@ -104,7 +104,7 @@ pub extern "system" fn Java_com_rcxcloud_core_SecureCore_isKilled(
 
 #[no_mangle]
 pub extern "system" fn Java_com_rcxcloud_core_SecureCore_encryptChunk(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _: JClass,
     file_id: jlong,
     cloud_id: jint,
@@ -137,7 +137,7 @@ pub extern "system" fn Java_com_rcxcloud_core_SecureCore_encryptChunk(
 
 #[no_mangle]
 pub extern "system" fn Java_com_rcxcloud_core_SecureCore_decryptChunk(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _: JClass,
     file_id: jlong,
     cloud_id: jint,
