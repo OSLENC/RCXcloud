@@ -12,7 +12,8 @@
 //! G5. Zeroize BEFORE unlock + dealloc
 //! G6. No Clone / Copy / Debug
 
-use core::alloc::{Layout, System};
+use core::alloc::Layout;
+use std::alloc::System;
 use core::cell::Cell;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
