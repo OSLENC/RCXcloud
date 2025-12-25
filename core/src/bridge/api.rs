@@ -80,6 +80,9 @@ pub struct Core {
     _no_send_sync: PhantomData<*const ()>,
 }
 
+unsafe impl Send for Core {}
+unsafe impl Sync for Core {}
+
 impl Core {
     /* ───────────── LIFECYCLE ───────────── */
 
