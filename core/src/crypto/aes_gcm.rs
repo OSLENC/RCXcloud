@@ -1,24 +1,32 @@
-
 //! AES-256-GCM — AEAD ONLY.
 //!
+//! TRUST LEVEL: Secure Core
+//!
 //! ENFORCED INVARIANTS:
-//! - No raw encrypt/decrypt APIs
-//! - Nonce is ALWAYS provided by caller (derived, not random)
-//! - Verify-then-decrypt only
-//! - No partial plaintext output on failure
+//! - AEAD only (no raw encrypt/decrypt)
+//! - Nonce is caller-provided (derived, never random here)
+//! - Verify-then-decrypt
+//! - No plaintext written on authentication failure
+//! - Output buffers wiped on ALL failures
+//! - Fail-closed
 //! - No panics
 
 use crate::memory::GuardedKey32;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce, Tag};
 use aead::{AeadInPlace, Payload};
 
-const NONCE_LEN: usize = 12;
-const TAG_LEN: usize = 16;
+/// AES-GCM standard nonce length (96-bit).
+pub const NONCE_LEN: usize = 12;
 
-/// Encrypt + authenticate in-place.
+/// AES-GCM authentication tag length.
+pub const TAG_LEN: usize = 16;
+
+/* ───────────── ENCRYPT ───────────── */
+
+/// Encrypt + authenticate.
 ///
-/// Output format:
-/// `[ ciphertext | tag (16) ]`
+/// Output layout:
+/// `[ ciphertext | tag ]`
 pub fn seal(
     key: &GuardedKey32,
     nonce: &[u8; NONCE_LEN],
@@ -26,36 +34,45 @@ pub fn seal(
     aad: &[u8],
     out: &mut [u8],
 ) -> Result<(), ()> {
-    if out.len() < plaintext.len() + TAG_LEN {
+    let pt_len = plaintext.len();
+    let required = pt_len + TAG_LEN;
+
+    if out.len() != required {
+        out.fill(0);
         return Err(());
     }
 
-    let cipher = Aes256Gcm::new_from_slice(key.borrow()).map_err(|_| ())?;
+    let cipher = Aes256Gcm::new_from_slice(key.borrow())
+        .map_err(|_| {
+            out.fill(0);
+            ()
+        })?;
 
-    // Copy plaintext into output buffer
-    out[..plaintext.len()].copy_from_slice(plaintext);
+    out[..pt_len].copy_from_slice(plaintext);
 
     let tag = cipher
         .encrypt_in_place_detached(
             Nonce::from_slice(nonce),
             Payload {
-                msg: &mut out[..plaintext.len()],
+                msg: &mut out[..pt_len],
                 aad,
             },
         )
-        .map_err(|_| ())?;
+        .map_err(|_| {
+            out[..pt_len].fill(0);
+            ()
+        })?;
 
-    out[plaintext.len()..plaintext.len() + TAG_LEN].copy_from_slice(tag.as_slice());
-
+    out[pt_len..].copy_from_slice(tag.as_slice());
     Ok(())
 }
 
-/// Authenticate + decrypt in-place.
-///
-/// Returns:
-/// - `true`  → authentication succeeded, plaintext written
-/// - `false` → authentication failed, output is zeroed
+/* ───────────── DECRYPT ───────────── */
 
+/// Authenticate + decrypt.
+///
+/// INPUT layout:
+/// `[ ciphertext | tag ]`
 pub fn open(
     key: &GuardedKey32,
     nonce: &[u8; NONCE_LEN],
@@ -64,38 +81,42 @@ pub fn open(
     out: &mut [u8],
 ) -> bool {
     if input.len() < TAG_LEN {
+        out.fill(0);
         return false;
     }
 
     let ct_len = input.len() - TAG_LEN;
-    if out.len() < ct_len {
+
+    if out.len() != ct_len {
+        out.fill(0);
         return false;
     }
 
     let cipher = match Aes256Gcm::new_from_slice(key.borrow()) {
         Ok(c) => c,
-        Err(_) => return false,
+        Err(_) => {
+            out.fill(0);
+            return false;
+        }
     };
 
     let tag = Tag::from_slice(&input[ct_len..]);
 
-    // Copy ciphertext into a temporary view of output,
-    // but do NOT expose it unless auth succeeds
-    out[..ct_len].copy_from_slice(&input[..ct_len]);
+    out.copy_from_slice(&input[..ct_len]);
 
-    let ok = cipher.decrypt_in_place_detached(
+    let res = cipher.decrypt_in_place_detached(
         Nonce::from_slice(nonce),
         Payload {
-            msg: &mut out[..ct_len],
+            msg: out,
             aad,
         },
         tag,
-    ).is_ok();
+    );
 
-    if !ok {
-        out[..ct_len].fill(0);
+    if res.is_err() {
+        out.fill(0);
+        return false;
     }
 
-    ok
+    true
 }
-
