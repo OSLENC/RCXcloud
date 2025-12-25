@@ -35,12 +35,12 @@ pub extern "system" fn Java_com_rcxcloud_core_SecureCore_unlockWithPhrase(
             .convert_byte_array(phrase)
             .map_err(|_| BridgeError::InvalidInput)?;
 
-        // ✅ FIX: Simplified syntax now that From trait is solid
         core()
             .unlock_with_phrase(phrase)
             .map_err(BridgeError::from)?;
 
-        Ok(())
+        // ✅ FIX: Explicit type annotation for the result
+        Ok::<(), BridgeError>(())
     }));
 
     match result {
@@ -50,8 +50,6 @@ pub extern "system" fn Java_com_rcxcloud_core_SecureCore_unlockWithPhrase(
     }
 }
 
-// ... rest of the file (lock, isKilled, etc.) ...
-// Ensure you keep the encrypt/decrypt functions from previous versions
 #[no_mangle]
 pub extern "system" fn Java_com_rcxcloud_core_SecureCore_lock(_: JNIEnv, _: JClass) {
     let _ = panic::catch_unwind(|| core().lock());
