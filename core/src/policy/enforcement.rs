@@ -1,28 +1,14 @@
-
 //! Policy enforcement engine.
 //!
 //! TRUST LEVEL: Secure Core
-//!
-//! FINAL AUTHORITY ON:
-//! - Permission checks
-//! - Kill authorization (NOT execution)
-//!
-//! SECURITY INVARIANTS:
-//! - Kill overrides ALL permissions
-//! - No soft kill
-//! - No re-unlock after kill
-//! - Kill is process-lifetime irreversible
-//! - Policy NEVER orchestrates kill mechanics
 
 use crate::policy::capability::Capability;
 use crate::device::registry::DeviceRegistry;
-use crate::kill;
-use crate::kill::GLOBAL_KILLED;
+use crate::keystore::master::GLOBAL_KILLED; // ✅ FIX: Correct import
 use core::sync::atomic::Ordering;
 
 /* ───────────── OPERATIONS ───────────── */
 
-/// High-level operations gated by policy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operation {
     Upload,
@@ -37,12 +23,6 @@ pub enum Operation {
 
 /* ───────────── CAPABILITY SET ───────────── */
 
-/// Read-only capability set (application supplied).
-///
-/// SECURITY:
-/// - Immutable
-/// - Non-owning
-/// - Cannot be escalated
 pub struct CapabilitySet {
     caps: &'static [Capability],
 }
@@ -60,12 +40,6 @@ impl CapabilitySet {
 
 /* ───────────── POLICY ENFORCER ───────────── */
 
-/// Central policy enforcement authority.
-///
-/// SECURITY:
-/// - No cryptography
-/// - No key access
-/// - Kill delegation ONLY
 pub struct PolicyEnforcer<'a> {
     registry: &'a DeviceRegistry,
     caps: CapabilitySet,
@@ -84,12 +58,8 @@ impl<'a> PolicyEnforcer<'a> {
 
     /* ───────────── PERMISSION CHECK ───────────── */
 
-    /// Check whether an operation is allowed.
-    ///
-    /// SECURITY:
-    /// - Kill state overrides ALL permissions
-    /// - Fail-closed
     pub fn allow(&self, op: Operation) -> bool {
+        // Kill state overrides ALL permissions
         if GLOBAL_KILLED.load(Ordering::SeqCst) || self.registry.is_killed() {
             return false;
         }
@@ -106,26 +76,7 @@ impl<'a> PolicyEnforcer<'a> {
         }
     }
 
-    /* ───────────── HARD KILL ───────────── */
-
-    /// Execute an irreversible device kill.
-    ///
-    /// SECURITY:
-    /// - Authorization handled here
-    /// - Execution delegated to kill subsystem
-    /// - NEVER RETURNS
-    pub fn execute_kill(&self, reason: &str) -> ! {
-        // Authorization check (fail closed)
-        if !self.allow(Operation::IssueKill) {
-            // Unauthorized kill attempt → immediate local kill
-            kill::execute_kill("unauthorized kill attempt");
-        }
-
-        // Delegate full execution
-        kill::execute_kill(
-    self.keystore(),
-    self.registry(),
-    self.next_replay_token(),
-)
-    }
+    // ✅ NOTE: execute_kill was removed. 
+    // The Bridge is responsible for calling kill::execute_kill()
+    // ONLY IF policy.allow(Operation::IssueKill) returns true.
 }
