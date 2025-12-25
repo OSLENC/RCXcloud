@@ -17,7 +17,7 @@ use crate::policy::capability::Capability;
 use crate::keystore::KeyStore;
 use crate::device::registry::DeviceRegistry;
 use crate::kill;
-use crate::keystore::master::GLOBAL_KILLED;
+use crate::kill::GLOBAL_KILLED;
 
 use core::sync::atomic::Ordering;
 
