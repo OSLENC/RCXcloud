@@ -2,32 +2,44 @@
 //!
 //! TRUST LEVEL: Secure Core
 //!
-//! SECURITY:
+//! SECURITY GUARANTEES:
 //! - No cached state
 //! - Deterministic per-device polymorphism
 //! - AEAD authenticated
-//! - Fail-closed
+//! - Fail-closed on all errors
 //! - No stack-resident secrets
+//! - Constant-time device binding
+
+#![deny(clippy::derive_debug)]
+
+use subtle::ConstantTimeEq;
 
 use crate::crypto::{
-    derive::{derive_key, Purpose},
     aes_gcm,
+    derive::{derive_key, Purpose},
 };
-use crate::memory::{GuardedKey32, Secret, wipe_vec};
 use crate::device::registry::DeviceRegistry;
-use crate::kill::replay::ReplayToken;
-use subtle::ConstantTimeEq;
+use crate::kill::{build_kill_aad, replay::ReplayToken};
+use crate::memory::{wipe_vec, GuardedKey32, Secret};
 
 /* ───────────── CONSTANTS ───────────── */
 
+/// AES-GCM nonce length (96-bit)
 const NONCE_LEN: usize = 12;
+
+/// AES-GCM authentication tag length
 const TAG_LEN: usize = 16;
+
+/// Kill protocol version
 const KILL_VERSION_V1: u8 = 1;
-const PLAINTEXT_LEN: usize = 49;
+
+/// Plaintext layout:
+/// [ version (1) | device_id (32) | replay (8) ]
+const PLAINTEXT_LEN: usize = 1 + 32 + 8;
 
 /* ───────────── PUBLIC TYPES ───────────── */
 
-/// Parsed kill decision (NON-SECRET).
+/// Authenticated kill decision (NON-SECRET).
 pub struct KillDecision {
     pub replay: ReplayToken,
 }
@@ -36,30 +48,50 @@ pub struct KillDecision {
 
 /// Verify and authenticate a kill blob.
 ///
-/// Returns `Some(KillDecision)` if valid.
+/// Returns `Some(KillDecision)` iff:
+/// - AEAD authentication succeeds
+/// - Protocol version matches
+/// - Device binding matches (constant-time)
+/// - Replay token parses correctly
+///
+/// FAIL-CLOSED on all errors.
 pub fn verify_kill_blob(
     registry: &DeviceRegistry,
     root_key: &GuardedKey32,
     blob: &[u8],
 ) -> Option<KillDecision> {
-    // 1️⃣ Derive per-device polymorphic kill key
-    let kill_key = derive_key(
+    /* ───── Derive per-device kill key ───── */
+
+    let mut kill_key = GuardedKey32::zeroed();
+
+    derive_key(
         root_key,
         Purpose::Recovery,
         registry.device_fingerprint(),
-    ).ok()?;
+        &mut kill_key,
+    )
+    .ok()?;
 
-    // 2️⃣ Build kill AAD
+    /* ───── Build authenticated associated data ───── */
+
     let aad = build_kill_aad(registry);
 
-    // 3️⃣ Decrypt + authenticate blob (AEAD)
+    /* ───── Decrypt + authenticate blob ───── */
+
     let plaintext = decrypt_blob(&kill_key, blob, &aad)?;
 
-    // 4️⃣ Parse payload
+    /* ───── Parse payload ───── */
+
     let parsed = parse_payload(plaintext.borrow())?;
 
-    // 5️⃣ Verify target device binding (constant-time)
-    if parsed.device_id.ct_eq(&registry.device_id()).into() == false {
+    /* ───── Constant-time device binding ───── */
+
+    if parsed
+        .device_id
+        .ct_eq(&registry.device_id())
+        .into()
+        == false
+    {
         return None;
     }
 
@@ -77,26 +109,9 @@ struct ParsedKill {
 
 /* ───────────── INTERNAL HELPERS ───────────── */
 
-/// Build authenticated associated data for kill blob.
+/// Decrypt and authenticate kill blob.
 ///
-/// AAD is NOT encrypted but MUST match exactly.
-fn build_kill_aad(registry: &DeviceRegistry) -> [u8; 24] {
-    let mut aad = [0u8; 24];
-
-    // "rcxcloud-kill-v1"
-    aad[..16].copy_from_slice(b"rcxcloud-kill-v1");
-
-    // fingerprint (u64 BE)
-    aad[16..24].copy_from_slice(
-        &registry.device_fingerprint().to_be_bytes()
-    );
-
-    aad
-}
-
-/// AES-GCM decrypt + authenticate kill blob.
-///
-/// Format:
+/// Expected format:
 /// [ nonce (12) | ciphertext | tag (16) ]
 fn decrypt_blob(
     key: &GuardedKey32,
@@ -139,11 +154,11 @@ fn decrypt_blob(
 }
 
 /// Parse authenticated kill payload.
+///
+/// ASSUMES:
+/// - AEAD authentication already succeeded
+/// - Length already verified
 fn parse_payload(buf: &[u8]) -> Option<ParsedKill> {
-    if buf.len() != PLAINTEXT_LEN {
-        return None;
-    }
-
     let mut device_id = [0u8; 32];
     device_id.copy_from_slice(&buf[1..33]);
 
