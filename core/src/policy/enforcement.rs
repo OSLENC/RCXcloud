@@ -1,3 +1,4 @@
+
 //! Policy enforcement engine.
 //!
 //! TRUST LEVEL: Secure Core
@@ -14,11 +15,9 @@
 //! - Policy NEVER orchestrates kill mechanics
 
 use crate::policy::capability::Capability;
-use crate::keystore::KeyStore;
 use crate::device::registry::DeviceRegistry;
 use crate::kill;
 use crate::kill::GLOBAL_KILLED;
-
 use core::sync::atomic::Ordering;
 
 /* ───────────── OPERATIONS ───────────── */
@@ -68,19 +67,16 @@ impl CapabilitySet {
 /// - No key access
 /// - Kill delegation ONLY
 pub struct PolicyEnforcer<'a> {
-    keystore: &'a KeyStore,
     registry: &'a DeviceRegistry,
     caps: CapabilitySet,
 }
 
 impl<'a> PolicyEnforcer<'a> {
     pub fn new(
-        keystore: &'a KeyStore,
         registry: &'a DeviceRegistry,
         caps: CapabilitySet,
     ) -> Self {
         Self {
-            keystore,
             registry,
             caps,
         }
