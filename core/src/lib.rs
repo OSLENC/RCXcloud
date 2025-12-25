@@ -43,8 +43,22 @@ mod keystore;
 mod kill;
 mod logging;
 mod memory;
-mod media;
 mod policy;
+
+// ─────────────────────────────────────────────
+// MEDIA PIPELINE (DESKTOP ONLY)
+// ─────────────────────────────────────────────
+//
+// Media parsing is hostile-input handling.
+// It belongs in Secure Core, BUT MUST NEVER exist on Android.
+//
+// Rule:
+// - Media compiles ONLY when:
+//   - NOT Android
+//   - feature "desktop-media" is enabled
+
+#[cfg(all(not(target_os = "android"), feature = "desktop-media"))]
+mod media;
 
 // ─────────────────────────────────────────────
 // BRIDGE (ONLY PUBLIC ENTRY POINT)
@@ -64,6 +78,12 @@ pub mod bridge;
 #[cfg(all(target_os = "android", not(feature = "android")))]
 compile_error!(
     "Android builds MUST enable the `android` feature in Cargo.toml"
+);
+
+// Media MUST NEVER be built on Android — even accidentally.
+#[cfg(all(target_os = "android", feature = "desktop-media"))]
+compile_error!(
+    "desktop-media feature is FORBIDDEN on Android targets"
 );
 
 // Load JNI bindings ONLY when explicitly requested.
