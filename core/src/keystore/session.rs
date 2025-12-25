@@ -1,18 +1,10 @@
 //! Active cryptographic session (OPERATION-BASED).
 //!
 //! TRUST LEVEL: Secure Core
-//!
-//! SECURITY INVARIANTS:
-//! - Session key is heap-locked (GuardedKey32)
-//! - Forbidden after global kill
-//! - Deterministic derivation only
-//! - AEAD verify-then-decrypt
-//! - Fail-closed
 
 #![deny(clippy::derive_debug)]
 
 use crate::crypto::{
-    aad::Aad,
     aes_gcm,
     derive::{derive_key, Purpose},
     nonce::derive_nonce,
@@ -23,27 +15,15 @@ use crate::memory::GuardedKey32;
 use core::marker::PhantomData;
 use core::sync::atomic::Ordering;
 
-/* ───────────── SEALED OUTPUT TRAITS ───────────── */
-
-mod sealed {
-    pub trait Sealed {}
-}
-
-pub trait SessionOutput: sealed::Sealed {}
-
 /* ───────────── OUTPUT TYPES ───────────── */
 
 #[derive(Clone, Copy)]
 pub struct EncryptResult {
     pub total_len: usize,
 }
-impl sealed::Sealed for EncryptResult {}
-impl SessionOutput for EncryptResult {}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct VerifyResult(pub bool, pub usize);
-impl sealed::Sealed for VerifyResult {}
-impl SessionOutput for VerifyResult {}
 
 /* ───────────── ERRORS ───────────── */
 
@@ -64,8 +44,6 @@ pub struct Session {
 }
 
 impl Session {
-    /* ───────────── CONSTRUCTION ───────────── */
-
     pub(crate) fn new(session_key: GuardedKey32) -> Self {
         Self {
             session_key: Some(session_key),
@@ -73,25 +51,20 @@ impl Session {
         }
     }
 
-    /* ───────────── INTERNAL GUARDS ───────────── */
-
     #[inline(always)]
     fn require_alive(&self) -> Result<&GuardedKey32, SessionError> {
         if GLOBAL_KILLED.load(Ordering::SeqCst) {
             return Err(SessionError::Killed);
         }
-
-        self.session_key
-            .as_ref()
-            .ok_or(SessionError::Locked)
+        self.session_key.as_ref().ok_or(SessionError::Locked)
     }
 
     /* ───────────── ENCRYPT ───────────── */
 
     pub fn encrypt_chunk(
-        &self, // Changed to &self to match Bridge usage (Session is usually accessed via with_session closure)
+        &self,
         file_id: u64,
-        cloud_id: u16,
+        _cloud_id: u16, // Ignored by current nonce spec
         chunk: u32,
         plaintext: &[u8],
         out: &mut [u8],
@@ -100,26 +73,28 @@ impl Session {
 
         let required = plaintext.len() + aes_gcm::TAG_LEN;
         if out.len() < required {
-             return Err(SessionError::OutputTooSmall);
+            return Err(SessionError::OutputTooSmall);
         }
 
         let mut enc_key = GuardedKey32::zeroed();
 
+        // ✅ FIX: Use Purpose::FileEncryption and u64 context
         derive_key(
             session_key,
-            Purpose::Storage, // Updated to match Purpose enum
-            &file_id.to_be_bytes(),
+            Purpose::FileEncryption,
+            file_id,
             &mut enc_key,
         )
         .map_err(|_| SessionError::CryptoFailure)?;
 
-        let nonce = derive_nonce(file_id, cloud_id, chunk);
+        // ✅ FIX: Pass the key to derive_nonce
+        let nonce = derive_nonce(&enc_key, file_id, chunk);
 
         let ct_len = aes_gcm::encrypt(
             &enc_key,
             &nonce,
             plaintext,
-            &[], // No AAD for basic chunks in this version
+            &[], // No AAD for chunks
             out,
         )
         .map_err(|_| SessionError::CryptoFailure)?;
@@ -134,7 +109,7 @@ impl Session {
     pub fn decrypt_chunk(
         &self,
         file_id: u64,
-        cloud_id: u16,
+        _cloud_id: u16,
         chunk: u32,
         ciphertext: &[u8],
         out: &mut [u8],
@@ -149,13 +124,13 @@ impl Session {
 
         derive_key(
             session_key,
-            Purpose::Storage,
-            &file_id.to_be_bytes(),
+            Purpose::FileEncryption,
+            file_id,
             &mut enc_key,
         )
         .map_err(|_| SessionError::CryptoFailure)?;
 
-        let nonce = derive_nonce(file_id, cloud_id, chunk);
+        let nonce = derive_nonce(&enc_key, file_id, chunk);
 
         let pt_len = aes_gcm::decrypt(
             &enc_key,
