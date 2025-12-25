@@ -122,6 +122,10 @@ impl<'a> PolicyEnforcer<'a> {
         }
 
         // Delegate full execution
-        kill::execute_kill(reason)
+        kill::execute_kill(
+    self.keystore(),
+    self.registry(),
+    self.next_replay_token(),
+)
     }
 }
