@@ -2,7 +2,7 @@
 #![allow(non_snake_case)]
 
 use crate::bridge::api::Core;
-use crate::bridge::error::BridgeError;
+use crate::bridge::error::BridgeError; // Ensure this is imported!
 
 use jni::objects::{JByteArray, JClass};
 use jni::sys::{jbyteArray, jint, jlong};
@@ -12,6 +12,7 @@ use std::panic::{self, AssertUnwindSafe};
 use std::sync::OnceLock;
 
 const AEAD_TAG_LEN: usize = 16;
+
 static CORE: OnceLock<Core> = OnceLock::new();
 
 #[inline(always)]
@@ -24,8 +25,6 @@ fn fail_null() -> jbyteArray {
     std::ptr::null_mut()
 }
 
-/* ───────────── EXPORTS ───────────── */
-
 #[no_mangle]
 pub extern "system" fn Java_com_rcxcloud_core_SecureCore_unlockWithPhrase(
     env: JNIEnv,
@@ -37,11 +36,11 @@ pub extern "system" fn Java_com_rcxcloud_core_SecureCore_unlockWithPhrase(
             .convert_byte_array(phrase)
             .map_err(|_| BridgeError::InvalidInput)?;
 
-        core()
-            .unlock_with_phrase(phrase)
-            .map_err(|e| BridgeError::from(e))?;
-
-        Ok(())
+        // ✅ FIX: Use explicit match or closure to guide compiler
+        match core().unlock_with_phrase(phrase) {
+            Ok(_) => Ok(()),
+            Err(core_err) => Err(BridgeError::from(core_err)),
+        }
     }));
 
     match result {
@@ -51,93 +50,46 @@ pub extern "system" fn Java_com_rcxcloud_core_SecureCore_unlockWithPhrase(
     }
 }
 
+// ... (Rest of file remains same: lock, isKilled, encrypt, decrypt) ...
+// Make sure to include the rest of the functions from previous step!
 #[no_mangle]
-pub extern "system" fn Java_com_rcxcloud_core_SecureCore_lock(
-    _: JNIEnv,
-    _: JClass,
-) {
-    let _ = panic::catch_unwind(|| {
-        core().lock();
-    });
+pub extern "system" fn Java_com_rcxcloud_core_SecureCore_lock(_: JNIEnv, _: JClass) {
+    let _ = panic::catch_unwind(|| core().lock());
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_rcxcloud_core_SecureCore_isKilled(
-    _: JNIEnv,
-    _: JClass,
-) -> jint {
-    let result = panic::catch_unwind(|| core().is_killed());
-    match result {
+pub extern "system" fn Java_com_rcxcloud_core_SecureCore_isKilled(_: JNIEnv, _: JClass) -> jint {
+    match panic::catch_unwind(|| core().is_killed()) {
         Ok(true) => 1,
         Ok(false) => 0,
-        Err(_) => 1, // fail-closed
+        Err(_) => 1,
     }
 }
 
 #[no_mangle]
 pub extern "system" fn Java_com_rcxcloud_core_SecureCore_encryptChunk(
-    env: JNIEnv,
-    _: JClass,
-    file_id: jlong,
-    cloud_id: jint,
-    chunk: jint,
-    plaintext: JByteArray,
+    env: JNIEnv, _: JClass, file_id: jlong, cloud_id: jint, chunk: jint, plaintext: JByteArray
 ) -> jbyteArray {
     let result = panic::catch_unwind(AssertUnwindSafe(|| {
         let data = env.convert_byte_array(plaintext).ok()?;
-        let required_cap = data.len().checked_add(AEAD_TAG_LEN)?;
-        let mut out = vec![0u8; required_cap];
-
-        core()
-            .encrypt_chunk(
-                file_id as u64,
-                cloud_id as u16,
-                chunk as u32,
-                &data,
-                &mut out
-            )
-            .ok()?;
-
+        let mut out = vec![0u8; data.len() + AEAD_TAG_LEN];
+        core().encrypt_chunk(file_id as u64, cloud_id as u16, chunk as u32, &data, &mut out).ok()?;
         env.byte_array_from_slice(&out).ok()
     }));
-
-    match result {
-        Ok(Some(arr)) => arr.as_raw(),
-        _ => fail_null(),
-    }
+    match result { Ok(Some(arr)) => arr.as_raw(), _ => fail_null() }
 }
 
 #[no_mangle]
 pub extern "system" fn Java_com_rcxcloud_core_SecureCore_decryptChunk(
-    env: JNIEnv,
-    _: JClass,
-    file_id: jlong,
-    cloud_id: jint,
-    chunk: jint,
-    ciphertext: JByteArray,
+    env: JNIEnv, _: JClass, file_id: jlong, cloud_id: jint, chunk: jint, ciphertext: JByteArray
 ) -> jbyteArray {
     let result = panic::catch_unwind(AssertUnwindSafe(|| {
         let data = env.convert_byte_array(ciphertext).ok()?;
         if data.len() < AEAD_TAG_LEN { return None; }
-        
         let mut out = vec![0u8; data.len() - AEAD_TAG_LEN];
-
-        let verified = core()
-            .decrypt_chunk(
-                file_id as u64,
-                cloud_id as u16,
-                chunk as u32,
-                &data,
-                &mut out
-            )
-            .ok()?;
-
-        if !verified.0 { return None; }
+        let ver = core().decrypt_chunk(file_id as u64, cloud_id as u16, chunk as u32, &data, &mut out).ok()?;
+        if !ver.0 { return None; }
         env.byte_array_from_slice(&out).ok()
     }));
-
-    match result {
-        Ok(Some(arr)) => arr.as_raw(),
-        _ => fail_null(),
-    }
+    match result { Ok(Some(arr)) => arr.as_raw(), _ => fail_null() }
 }
