@@ -13,7 +13,7 @@
 
 use crate::memory::GuardedKey32;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce, Tag};
-use aead::{AeadInPlace, Payload};
+use aes_gcm::aead::{AeadInPlace, Payload};
 
 /// AES-GCM standard nonce length (96-bit).
 pub const NONCE_LEN: usize = 12;
