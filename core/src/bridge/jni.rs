@@ -171,4 +171,3 @@ pub extern "system" fn Java_com_rcxcloud_core_SecureCore_decryptChunk(
         _ => fail_null(),
     }
 }
-
