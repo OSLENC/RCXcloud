@@ -100,3 +100,5 @@ pub fn recover_from_phrase(
     // Root is dropped here; session becomes authority
     Ok(RecoveryAuthority { session })
 }
+
+
