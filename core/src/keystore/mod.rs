@@ -1,12 +1,4 @@
 //! Secure keystore — SINGLE AUTHORITY.
-//!
-//! FORMAL INVARIANTS (ENFORCED):
-//! - Exactly one active session at a time
-//! - Session keys never escape GuardedKey32
-//! - Remote kill is PROCESS-LIFETIME irreversible
-//! - No unlock or use possible after kill
-//! - Mutex poisoning FAILS CLOSED (permanent kill)
-//! - No panics propagate secrets
 
 #![deny(clippy::derive_debug)]
 
@@ -26,6 +18,7 @@ use crate::keystore::master::GLOBAL_KILLED;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyStoreError {
     Locked,
+    AlreadyUnlocked,
     Killed,
     Poisoned,
     Session(SessionError),
@@ -42,7 +35,6 @@ impl From<SessionError> for KeyStoreError {
 enum State {
     Locked,
     Active(Session),
-    Killed,
 }
 
 /* ───────────── KEYSTORE ───────────── */
@@ -62,8 +54,8 @@ impl KeyStore {
     ///
     /// SECURITY:
     /// - Forbidden after global kill
-    /// - Mutex poisoning permanently kills keystore
-    /// - Authority is consumed exactly once
+    /// - Authority is single-use
+    /// - Mutex poisoning FAILS CLOSED
     pub fn unlock(&self, auth: RecoveryAuthority) -> Result<(), KeyStoreError> {
         if GLOBAL_KILLED.load(Ordering::SeqCst) {
             return Err(KeyStoreError::Killed);
@@ -80,17 +72,11 @@ impl KeyStore {
                 *g = State::Active(Session::new(session_key));
                 Ok(())
             }
-            State::Active(_) => Err(KeyStoreError::Locked),
-            State::Killed => Err(KeyStoreError::Killed),
+            State::Active(_) => Err(KeyStoreError::AlreadyUnlocked),
         }
     }
 
     /// Execute a cryptographic operation within the active session.
-    ///
-    /// SECURITY:
-    /// - Global kill is checked first
-    /// - Mutex poisoning permanently kills keystore
-    /// - Session enforces its own kill semantics
     pub fn with_session<F, R>(&self, f: F) -> Result<R, KeyStoreError>
     where
         F: FnOnce(&mut Session) -> Result<R, SessionError>,
@@ -108,25 +94,27 @@ impl KeyStore {
         match &mut *g {
             State::Active(s) => f(s).map_err(KeyStoreError::from),
             State::Locked => Err(KeyStoreError::Locked),
-            State::Killed => Err(KeyStoreError::Killed),
         }
     }
 
     /// Local lock (user-initiated).
     ///
     /// SECURITY:
-    /// - Allowed ONLY from Active state
-    /// - NO EFFECT after kill
-    /// - Mutex poisoning escalates to global kill
+    /// - Explicitly kills active session
+    /// - No effect after global kill
     pub fn lock(&self) {
+        if GLOBAL_KILLED.load(Ordering::SeqCst) {
+            return;
+        }
+
         match self.state.lock() {
             Ok(mut g) => {
-                if matches!(*g, State::Active(_)) {
+                if let State::Active(ref mut s) = *g {
+                    s.kill();
                     *g = State::Locked;
                 }
             }
             Err(_) => {
-                // Any poisoning = permanent compromise
                 GLOBAL_KILLED.store(true, Ordering::SeqCst);
             }
         }
@@ -134,22 +122,21 @@ impl KeyStore {
 
     /// 🔥 IRREVERSIBLE CLOUD KILL 🔥
     ///
-    /// SECURITY:
-    /// - Cryptographically verified
-    /// - Immediately kills active session
-    /// - Process-lifetime irreversible
-    pub fn apply_remote_kill(&self, kill_blob: &[u8]) {
-        if !crate::kill::verify_kill_blob(kill_blob) {
-            return;
-        }
-
+    /// CALLED ONLY AFTER:
+    /// - kill blob verification
+    /// - replay check
+    ///
+    /// This function performs **execution only**.
+    pub(crate) fn apply_verified_kill(&self) {
         GLOBAL_KILLED.store(true, Ordering::SeqCst);
 
         if let Ok(mut g) = self.state.lock() {
             if let State::Active(ref mut s) = *g {
                 s.kill();
             }
-            *g = State::Killed;
+            *g = State::Locked;
         }
     }
 }
+
+
