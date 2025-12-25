@@ -21,7 +21,7 @@ use rand_core::{OsRng, RngCore};
 
 /* ───────────── GLOBAL CORE REGISTRY ───────────── */
 
-static CORE: OnceLock<Core> = OnceLock::new();
+static CORE: OnceLock<std::sync::Mutex<Option<Box<Core>>>> = OnceLock::new();
 static CORE_ID: OnceLock<NonZeroU64> = OnceLock::new();
 
 /* ───────────── HELPERS ───────────── */
