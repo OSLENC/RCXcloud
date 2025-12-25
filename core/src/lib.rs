@@ -57,8 +57,6 @@ mod policy;
 //   - NOT Android
 //   - feature "desktop-media" is enabled
 
-#[cfg(all(not(target_os = "android"), feature = "desktop-media"))]
-mod media;
 
 // ─────────────────────────────────────────────
 // BRIDGE (ONLY PUBLIC ENTRY POINT)
