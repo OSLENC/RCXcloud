@@ -1,20 +1,10 @@
-
 //! AES-256-GCM — AEAD ONLY.
 //!
 //! TRUST LEVEL: Secure Core
-//!
-//! ENFORCED INVARIANTS:
-//! - AEAD only (no raw encrypt/decrypt)
-//! - Nonce is caller-provided (derived, never random here)
-//! - Verify-then-decrypt
-//! - No plaintext written on authentication failure
-//! - Output buffers wiped on ALL failures
-//! - Fail-closed
-//! - No panics
 
 use crate::memory::GuardedKey32;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce, Tag};
-use aes_gcm::aead::{AeadInPlace, Payload};
+use aes_gcm::aead::AeadInPlace;
 
 /// AES-GCM standard nonce length (96-bit).
 pub const NONCE_LEN: usize = 12;
@@ -24,10 +14,6 @@ pub const TAG_LEN: usize = 16;
 
 /* ───────────── ENCRYPT ───────────── */
 
-/// Encrypt + authenticate.
-///
-/// Output layout:
-/// `[ ciphertext | tag ]`
 pub fn seal(
     key: &GuardedKey32,
     nonce: &[u8; NONCE_LEN],
@@ -43,16 +29,18 @@ pub fn seal(
         return Err(());
     }
 
-    let cipher = Aes256Gcm::new_from_slice(key.borrow())
-        .map_err(|_| {
-            out.fill(0);
-            ()
-        })?;
+    let cipher = Aes256Gcm::new_from_slice(key.borrow()).map_err(|_| {
+        out.fill(0);
+        ()
+    })?;
 
+    // Copy plaintext into output buffer
     out[..pt_len].copy_from_slice(plaintext);
 
+    let nonce = Nonce::from_slice(nonce);
+
     let tag = cipher
-        .encrypt_in_place_detached(nonce, aad, buffer)
+        .encrypt_in_place_detached(nonce, aad, &mut out[..pt_len])
         .map_err(|_| {
             out[..pt_len].fill(0);
             ()
@@ -64,10 +52,6 @@ pub fn seal(
 
 /* ───────────── DECRYPT ───────────── */
 
-/// Authenticate + decrypt.
-///
-/// INPUT layout:
-/// `[ ciphertext | tag ]`
 pub fn open(
     key: &GuardedKey32,
     nonce: &[u8; NONCE_LEN],
@@ -95,13 +79,15 @@ pub fn open(
         }
     };
 
-    let tag = Tag::from_slice(&input[ct_len..]);
-
     out.copy_from_slice(&input[..ct_len]);
 
-    let res = cipher.decrypt_in_place_detached(nonce, aad, buffer, tag);
+    let nonce = Nonce::from_slice(nonce);
+    let tag = Tag::from_slice(&input[ct_len..]);
 
-    if res.is_err() {
+    if cipher
+        .decrypt_in_place_detached(nonce, aad, out, tag)
+        .is_err()
+    {
         out.fill(0);
         return false;
     }
