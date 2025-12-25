@@ -29,7 +29,7 @@ const AEAD_TAG_LEN: usize = 16;
 
 /* ───────────── SINGLETON ───────────── */
 
-static CORE: OnceLock<Core> = OnceLock::new();
+static CORE: OnceLock<std::sync::Mutex<Option<Box<Core>>>> = OnceLock::new();
 
 #[inline(always)]
 fn core() -> &'static Core {
