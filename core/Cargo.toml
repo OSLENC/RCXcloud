@@ -1,8 +1,6 @@
 # =========================
 # RCXCloud Secure Core
-# Workspace + Crate
 # =========================
-
 [package]
 name = "rcxcore"
 version = "0.1.0"
@@ -10,8 +8,6 @@ edition = "2021"
 publish = false
 
 [lib]
-# rlib   -> internal Rust usage
-# cdylib -> JNI / Android / FFI
 crate-type = ["rlib", "cdylib"]
 
 # =========================
@@ -19,34 +15,48 @@ crate-type = ["rlib", "cdylib"]
 # =========================
 
 [dependencies]
-# Memory safety & zeroization (SINGLE VERSION, FEATURES ENABLED)
-zeroize = { version = "1.7", features = ["zeroize_derive"] }
+# ---- Memory & Zeroization ----
+zeroize = { version = "1.7", features = ["zeroize_derive", "alloc"] }
 
-# Symmetric encryption (AES-256-GCM)
-aes-gcm = { version = "0.10", features = ["aes"] }
-
-# Password / key derivation
-argon2 = { version = "0.5", features = ["zeroize"] }
-
-# Post-quantum-safe ECDH (backup / recovery)
-x25519-dalek = { version = "2.0", features = ["zeroize", "static_secrets"] }
-
-# Key derivation helpers
-hkdf = "0.12"
-
-# Hashing / integrity
+# ---- Crypto Primitives ----
+aes-gcm = { version = "0.10", features = ["aes", "alloc"] }
 sha2 = "0.10"
+hmac = "0.12"      # ✅ Added (Required by nonce.rs)
+hkdf = "0.12"
 subtle = "2.5"
 
-# OS randomness (Android-safe)
+# ---- Key Derivation & Recovery ----
+argon2 = { version = "0.5", features = ["zeroize", "alloc"] }
+x25519-dalek = { version = "2.0", features = ["static_secrets", "zeroize"] }
+
+# ---- OS Randomness ----
 rand_core = { version = "0.6", features = ["getrandom"] }
 
+# ---- Platform Bindings ----
+# Optional: Only enabled via "android" feature
+jni = { version = "0.21", optional = true } # ✅ Added (Required by bridge)
+
+# ---- Media Pipeline ----
+# Required for media sanitization
+ffmpeg-next = "6.0" # ✅ Added (Required by media/*)
 
 # =========================
-# Build-time safety (OPTIONAL BUT RECOMMENDED)
+# Dev Dependencies (Tests)
 # =========================
+[dev-dependencies]
+rand = "0.8"       # Used in stress tests
+serial_test = "2.0"
 
-[build-dependencies]
-rustc_version = "0.4"
+# =========================
+# Features
+# =========================
+[features]
+default = []
+android = ["jni"]
+kill-admin = []
 
-
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1
+strip = true
