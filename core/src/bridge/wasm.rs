@@ -1,3 +1,5 @@
+	#![allow(unsafe_code)]
+
 //! WASM / C ABI bridge for Secure Core.
 //!
 //! SECURITY:
