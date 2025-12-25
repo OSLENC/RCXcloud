@@ -1,19 +1,16 @@
-
 //! Key hierarchy & deterministic derivation.
 //!
 //! TRUST LEVEL: Secure Core
 //!
 //! FORMAL INVARIANTS (ENFORCED):
-//! - Master key is NEVER used directly
+//! - Parent key is NEVER used directly
 //! - All derived keys are purpose-bound
 //! - Deterministic derivation (no RNG)
 //! - Domain separation via Purpose tags
 //! - Derivation context is explicit and typed
-//! - Output keys live ONLY in GuardedKey32
+//! - Output keys are written IN-PLACE only
 //! - Caller never handles raw key bytes
 //! - NO panics in cryptographic paths
-//!
-//! This module is misuse-resistant by construction.
 
 use crate::memory::GuardedKey32;
 use hkdf::Hkdf;
@@ -21,10 +18,11 @@ use sha2::Sha256;
 
 /// Cryptographic purpose tags.
 ///
-/// ❗ Adding a new variant is a SECURITY decision.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// ❗ Adding or modifying a variant is a SECURITY DECISION.
+/// ❗ Labels are part of the cryptographic protocol.
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Purpose {
-    /// File content encryption (chunks)
+    /// File chunk encryption keys
     FileEncryption,
 
     /// File metadata protection
@@ -33,12 +31,15 @@ pub enum Purpose {
     /// Device-to-device pairing
     Pairing,
 
-    /// Backup / recovery material
+    /// Recovery / kill / admin control
     Recovery,
 }
 
 impl Purpose {
-    /// Domain separation label (compile-time fixed).
+    /// Fixed domain-separation label.
+    ///
+    /// ⚠️ MUST remain stable forever.
+    /// Changing this breaks backward compatibility.
     #[inline(always)]
     fn label(self) -> &'static [u8] {
         match self {
@@ -50,54 +51,58 @@ impl Purpose {
     }
 }
 
-/// Deterministically derive a child key from a parent key.
+/// Deterministically derive a child key into an existing buffer.
 ///
 /// SECURITY:
 /// - HKDF-SHA256
+/// - Parent key used as IKM (correct HKDF usage)
 /// - No randomness
 /// - No heap allocations
-/// - No stack copies of key material
 /// - Output written directly into GuardedKey32
-/// - NO panics
+/// - Fail-closed on error
 ///
-/// `context` MUST uniquely identify the target (e.g. file_id).
+/// `context` MUST uniquely identify the target
+/// (e.g. file_id, device_id hash, registry fingerprint).
+#[inline(always)]
 pub fn derive_key(
     parent: &GuardedKey32,
     purpose: Purpose,
-    context: u128,
-) -> Result<GuardedKey32, ()> {
-    let mut out = GuardedKey32::zeroed();
-
-    // ───────────── INFO ENCODING (FIXED) ─────────────
-    //
-    // Layout (32 bytes total):
-    // [0]        = label length (u8)
-    // [1..=15]   = purpose label (max 15 bytes)
-    // [16..=31]  = context (u128, big-endian)
-    //
-    // This encoding is:
-    // - unambiguous
-    // - collision-resistant
-    // - forward-compatible
-
+    context: u64,
+    out: &mut GuardedKey32,
+) -> Result<(), ()> {
     let label = purpose.label();
-    let label_len = label.len();
 
-    // Compile-time safety: labels must remain short
-    debug_assert!(label_len <= 15);
+    // Hard safety limit: labels must stay short & fixed
+    if label.len() > 32 {
+        return Err(());
+    }
 
-    let mut info = [0u8; 32];
-    info[0] = label_len as u8;
-    info[1..1 + label_len].copy_from_slice(label);
-    info[16..32].copy_from_slice(&context.to_be_bytes());
+    // ───────────── INFO ENCODING ─────────────
+    //
+    // info = label || context_be
+    //
+    // Properties:
+    // - fixed-width
+    // - unambiguous
+    // - deterministic
+    // - forward-auditable
+    let mut info = [0u8; 32 + 8];
+    info[..label.len()].copy_from_slice(label);
+    info[label.len()..label.len() + 8]
+        .copy_from_slice(&context.to_be_bytes());
 
+    // HKDF extract+expand
+    // - No salt (parent key already high entropy)
+    // - Parent key is IKM (never used directly elsewhere)
     let hkdf = Hkdf::<Sha256>::new(
-        Some(parent.borrow()), // salt = parent key (domain separation)
-        &info,
+        None,
+        parent.borrow(),
     );
+// NOTE: salt intentionally None; parent key is high-entropy IKM
 
-    hkdf.expand(b"rcxcloud-derive", out.borrow_mut())
-        .map_err(|_| ())?;
-
-    Ok(out)
+    hkdf.expand(
+        &info[..label.len() + 8],
+        out.borrow_mut(),
+    )
+    .map_err(|_| ())
 }
