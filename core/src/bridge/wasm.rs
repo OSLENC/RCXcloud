@@ -93,4 +93,3 @@ pub extern "C" fn rcx_unlock_with_phrase(
         Err(_) => BridgeError::CryptoFailure as i32,
     }
 }
-
