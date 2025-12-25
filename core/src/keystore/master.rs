@@ -1,4 +1,18 @@
 //! Master Key Management (Secure Core).
+//!
+//! TRUST LEVEL: Secure Core (Trust Anchor)
+//!
+//! RESPONSIBILITIES:
+//! - Owns the master encryption key
+//! - Enforces global irreversible kill
+//! - Fail-closed on poisoning
+//! - Zeroizes secrets on kill
+//!
+//! SECURITY INVARIANTS:
+//! - Single authority
+//! - No recovery after kill
+//! - Mutex poisoning escalates to kill
+//! - No logging, no panics
 
 #![deny(clippy::derive_debug)]
 
@@ -7,16 +21,31 @@ use crate::memory::GuardedKey32;
 use core::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
-/* ───────────── GLOBAL KILL FUSE ───────────── */
+/* ─────────────────────────────────────────────
+   GLOBAL KILL FUSE (PROCESS-LIFETIME)
+   ───────────────────────────────────────────── */
 
-pub(crate) static GLOBAL_KILLED: AtomicBool = AtomicBool::new(false);
+/// 🔥 GLOBAL IRREVERSIBLE KILL FLAG 🔥
+///
+/// Once set:
+/// - Cannot be unset
+/// - All operations must fail closed
+/// - Master key is considered permanently wiped
+///
+/// Visibility:
+/// - `pub` is REQUIRED so all Secure Core modules
+///   (kill, policy, logging, crypto, bridge)
+///   can observe the terminal state.
+pub static GLOBAL_KILLED: AtomicBool = AtomicBool::new(false);
 
 #[inline(always)]
 pub(crate) fn is_globally_killed() -> bool {
     GLOBAL_KILLED.load(Ordering::SeqCst)
 }
 
-/* ───────────── ERRORS ───────────── */
+/* ─────────────────────────────────────────────
+   ERRORS
+   ───────────────────────────────────────────── */
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum KeystoreError {
@@ -26,7 +55,9 @@ pub enum KeystoreError {
     AlreadyUnlocked,
 }
 
-/* ───────────── INTERNAL STATE ───────────── */
+/* ─────────────────────────────────────────────
+   INTERNAL STATE
+   ───────────────────────────────────────────── */
 
 enum KeyState {
     Locked,
@@ -34,8 +65,17 @@ enum KeyState {
     Wiped,
 }
 
-/* ───────────── MASTER KEY STORE ───────────── */
+/* ─────────────────────────────────────────────
+   MASTER KEY STORE
+   ───────────────────────────────────────────── */
 
+/// MasterKeyStore
+///
+/// SECURITY PROPERTIES:
+/// - Single mutable authority
+/// - Mutex-protected
+/// - Poisoning escalates to global kill
+/// - Zeroization guaranteed on kill
 pub struct MasterKeyStore {
     state: Mutex<KeyState>,
 }
@@ -86,7 +126,14 @@ impl MasterKeyStore {
 
     /// 🔥 IRREVERSIBLE TERMINAL KILL 🔥
     ///
-    /// Caller MUST have already verified kill authorization.
+    /// Preconditions:
+    /// - Kill authorization already verified
+    /// - Replay protection already enforced
+    ///
+    /// Effects:
+    /// - GLOBAL_KILLED permanently set
+    /// - Master key wiped
+    /// - No return to usable state
     pub fn apply_verified_kill(&self) {
         GLOBAL_KILLED.store(true, Ordering::SeqCst);
 
@@ -114,6 +161,7 @@ impl MasterKeyStore {
 
     fn acquire_lock(&self) -> Result<MutexGuard<'_, KeyState>, KeystoreError> {
         self.state.lock().map_err(|_| {
+            // Mutex poisoning is a fatal security event
             GLOBAL_KILLED.store(true, Ordering::SeqCst);
             KeystoreError::Poisoned
         })
