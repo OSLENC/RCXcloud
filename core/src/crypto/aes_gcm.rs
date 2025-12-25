@@ -1,3 +1,4 @@
+
 //! AES-256-GCM — AEAD ONLY.
 //!
 //! TRUST LEVEL: Secure Core
@@ -51,13 +52,7 @@ pub fn seal(
     out[..pt_len].copy_from_slice(plaintext);
 
     let tag = cipher
-        .encrypt_in_place_detached(
-            Nonce::from_slice(nonce),
-            Payload {
-                msg: &mut out[..pt_len],
-                aad,
-            },
-        )
+        .encrypt_in_place_detached(nonce, aad, buffer)
         .map_err(|_| {
             out[..pt_len].fill(0);
             ()
@@ -104,14 +99,7 @@ pub fn open(
 
     out.copy_from_slice(&input[..ct_len]);
 
-    let res = cipher.decrypt_in_place_detached(
-        Nonce::from_slice(nonce),
-        Payload {
-            msg: out,
-            aad,
-        },
-        tag,
-    );
+    let res = cipher.decrypt_in_place_detached(nonce, aad, buffer, tag);
 
     if res.is_err() {
         out.fill(0);
