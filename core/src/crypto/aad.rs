@@ -1,40 +1,47 @@
-
+//! NOTE:
+//! This module MUST NOT be used for kill / recovery / control-plane AEAD.
+//! Kill AAD is defined exclusively in `kill::protocol`.
 //! Typed AEAD Associated Data (AAD).
 //!
 //! TRUST LEVEL: Secure Core
 //!
-//! FORMAL INVARIANTS (ENFORCED):
-//! - AAD is STRUCTURED, not raw bytes
-//! - All fields are fixed-width
-//! - Serialization is deterministic
-//! - Caller cannot omit security-critical context
-//! - Used for BOTH encryption and decryption
-//!
-//! AAD is authenticated but NOT encrypted.
+//! FORMAL INVARIANTS:
+//! - Structured, fixed-width
+//! - Deterministic serialization
+//! - Versioned
+//! - Used ONLY for file encryption AEAD
 
-/// Associated data bound to each encrypted chunk.
-///
-/// This prevents:
-/// - cross-file replay
-/// - cross-cloud replay
-/// - chunk reordering
-/// - version downgrade attacks
+/// Current supported AAD format version.
+pub const AAD_VERSION_V1: u8 = 1;
+
 #[derive(Clone, Copy)]
 pub struct Aad {
-    pub file_id: u64,
-    pub chunk: u32,
-    pub cloud_id: u16,
-    pub version: u8,
+    file_id: u64,
+    chunk: u32,
+    cloud_id: u16,
+    version: u8,
 }
 
 impl Aad {
-    /// Serialize AAD into a fixed-length byte array.
-    ///
-    /// Layout (15 bytes total):
-    /// - [0..8]   file_id   (u64, BE)
-    /// - [8..12]  chunk     (u32, BE)
-    /// - [12..14] cloud_id  (u16, BE)
-    /// - [14]     version   (u8)
+    #[inline(always)]
+    pub fn new(
+        file_id: u64,
+        chunk: u32,
+        cloud_id: u16,
+        version: u8,
+    ) -> Option<Self> {
+        if version != AAD_VERSION_V1 {
+            return None;
+        }
+
+        Some(Self {
+            file_id,
+            chunk,
+            cloud_id,
+            version,
+        })
+    }
+
     #[inline(always)]
     pub fn serialize(&self) -> [u8; 15] {
         let mut out = [0u8; 15];
@@ -44,4 +51,13 @@ impl Aad {
         out[14] = self.version;
         out
     }
+
+    #[inline(always)]
+    pub fn file_id(&self) -> u64 { self.file_id }
+    #[inline(always)]
+    pub fn chunk(&self) -> u32 { self.chunk }
+    #[inline(always)]
+    pub fn cloud_id(&self) -> u16 { self.cloud_id }
+    #[inline(always)]
+    pub fn version(&self) -> u8 { self.version }
 }
