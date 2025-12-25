@@ -11,6 +11,7 @@
 //! - No raw key exposure
 //! - No Clone / Copy / Debug
 
+#[derive(Debug)]
 #![deny(clippy::derive_debug)]
 
 use crate::crypto::{
