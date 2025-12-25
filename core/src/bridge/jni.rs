@@ -2,7 +2,7 @@
 #![allow(non_snake_case)]
 
 use crate::bridge::api::Core;
-use crate::bridge::error::BridgeError; // Ensure this is imported!
+use crate::bridge::error::BridgeError;
 
 use jni::objects::{JByteArray, JClass};
 use jni::sys::{jbyteArray, jint, jlong};
@@ -12,7 +12,6 @@ use std::panic::{self, AssertUnwindSafe};
 use std::sync::OnceLock;
 
 const AEAD_TAG_LEN: usize = 16;
-
 static CORE: OnceLock<Core> = OnceLock::new();
 
 #[inline(always)]
@@ -36,11 +35,12 @@ pub extern "system" fn Java_com_rcxcloud_core_SecureCore_unlockWithPhrase(
             .convert_byte_array(phrase)
             .map_err(|_| BridgeError::InvalidInput)?;
 
-        // ✅ FIX: Use explicit match or closure to guide compiler
-        match core().unlock_with_phrase(phrase) {
-            Ok(_) => Ok(()),
-            Err(core_err) => Err(BridgeError::from(core_err)),
-        }
+        // ✅ FIX: Simplified syntax now that From trait is solid
+        core()
+            .unlock_with_phrase(phrase)
+            .map_err(BridgeError::from)?;
+
+        Ok(())
     }));
 
     match result {
@@ -50,8 +50,8 @@ pub extern "system" fn Java_com_rcxcloud_core_SecureCore_unlockWithPhrase(
     }
 }
 
-// ... (Rest of file remains same: lock, isKilled, encrypt, decrypt) ...
-// Make sure to include the rest of the functions from previous step!
+// ... rest of the file (lock, isKilled, etc.) ...
+// Ensure you keep the encrypt/decrypt functions from previous versions
 #[no_mangle]
 pub extern "system" fn Java_com_rcxcloud_core_SecureCore_lock(_: JNIEnv, _: JClass) {
     let _ = panic::catch_unwind(|| core().lock());
