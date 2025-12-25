@@ -20,7 +20,7 @@ pub fn execute_kill(
     keystore: &KeyStore,
     registry: &DeviceRegistry,
     replay: ReplayToken,
-) -> Result<!, KillError> {
+) -> ! {
     // 1️⃣ Replay protection (FAIL CLOSED)
     if !check_and_commit(replay) {
         return Err(KillError::ReplayDetected);
