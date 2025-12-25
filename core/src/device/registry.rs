@@ -111,7 +111,7 @@ impl DeviceRegistry {
             Err(_) => return true, // FAIL CLOSED
         };
 
-        match log.read_records() {
+        match log.has_any_content() {
             Ok(records) => !records.is_empty(),
             Err(_) => true, // FAIL CLOSED
         }
@@ -156,4 +156,3 @@ impl DeviceRegistry {
         })
     }
 }
-
