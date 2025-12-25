@@ -28,4 +28,4 @@ pub mod jni;
 // ❄️ ONLY THESE ARE PUBLIC
 pub use api::{Core, CoreError};
 pub use error::BridgeError;
-pub use handle::CoreHandle;pub mod jni;
+pub use handle::CoreHandle;
