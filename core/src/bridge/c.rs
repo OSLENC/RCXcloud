@@ -46,4 +46,3 @@ int rcx_core_is_killed(void);
 #ifdef __cplusplus
 }
 #endif
-
