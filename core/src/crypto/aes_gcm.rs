@@ -5,20 +5,24 @@
 //! INVARIANTS:
 //! - 96-bit Nonce (Fixed)
 //! - 128-bit Tag (Fixed)
-//! - Key is GuardedKey32 (Heap Protected)
+//! - Deterministic Nonce (enforced upstream)
+//! - Typed AAD (enforced upstream)
+//! - No panics
+//! - No logging
+//! - Fail closed
 
 use crate::memory::GuardedKey32;
 use aes_gcm::{
-    aead::{Aead, KeyInit, Payload},
-    Aes256Gcm, Nonce, Tag,
+    aead::{AeadInPlace, KeyInit},
+    Aes256Gcm, Nonce,
 };
 
 pub const TAG_LEN: usize = 16;
 pub const NONCE_LEN: usize = 12;
 
-/// Encrypt data in-place or into a buffer.
+/// Encrypt plaintext into `dst`.
 ///
-/// Returns the length of the ciphertext (plaintext.len() + 16).
+/// Returns ciphertext length (plaintext.len() + TAG_LEN).
 pub fn encrypt(
     key: &GuardedKey32,
     nonce: &[u8; NONCE_LEN],
@@ -26,33 +30,36 @@ pub fn encrypt(
     aad: &[u8],
     dst: &mut [u8],
 ) -> Result<usize, ()> {
-    let cipher = Aes256Gcm::new(key.borrow().into());
-    let nonce = Nonce::from_slice(nonce);
-
-    let payload = Payload {
-        msg: plaintext,
-        aad,
-    };
-
-    // We use the 'encrypt' method which allocates a Vec by default in some versions,
-    // but here we want to write to 'dst'. 
-    // Optimization: For strict memory control, we verify size first.
-    if dst.len() < plaintext.len() + TAG_LEN {
+    let required = plaintext.len() + TAG_LEN;
+    if dst.len() < required {
         return Err(());
     }
 
-    let ct = cipher.encrypt(nonce, payload).map_err(|_| ())?;
-    
-    // Copy result to destination (since Aead trait returns Vec by default)
-    // In a zero-alloc env, we would use AeadInPlace, but for now this is safe.
-    dst[..ct.len()].copy_from_slice(&ct);
-    
-    Ok(ct.len())
+    let cipher = Aes256Gcm::new(key.borrow().into());
+    let nonce = Nonce::from_slice(nonce);
+
+    // Copy plaintext into dst buffer
+    dst[..plaintext.len()].copy_from_slice(plaintext);
+
+    // Encrypt in place (appends tag)
+    let ct_len = match cipher.encrypt_in_place_detached(
+        nonce,
+        aad,
+        &mut dst[..plaintext.len()],
+    ) {
+        Ok(tag) => {
+            dst[plaintext.len()..required].copy_from_slice(&tag);
+            required
+        }
+        Err(_) => return Err(()),
+    };
+
+    Ok(ct_len)
 }
 
-/// Decrypt data.
+/// Decrypt ciphertext into `dst`.
 ///
-/// Returns the length of the plaintext (ciphertext.len() - 16).
+/// Returns plaintext length (ciphertext.len() - TAG_LEN).
 pub fn decrypt(
     key: &GuardedKey32,
     nonce: &[u8; NONCE_LEN],
@@ -60,43 +67,29 @@ pub fn decrypt(
     aad: &[u8],
     dst: &mut [u8],
 ) -> Result<usize, ()> {
-    let cipher = Aes256Gcm::new(key.borrow().into());
-    let nonce = Nonce::from_slice(nonce);
-
-    let payload = Payload {
-        msg: ciphertext,
-        aad,
-    };
-
-    let pt = cipher.decrypt(nonce, payload).map_err(|_| ())?;
-
-    if dst.len() < pt.len() {
+    if ciphertext.len() < TAG_LEN {
         return Err(());
     }
 
-    dst[..pt.len()].copy_from_slice(&pt);
+    let pt_len = ciphertext.len() - TAG_LEN;
+    if dst.len() < pt_len {
+        return Err(());
+    }
 
-    Ok(pt.len())
-}
+    let cipher = Aes256Gcm::new(key.borrow().into());
+    let nonce = Nonce::from_slice(nonce);
 
-// Re-export seal/open for legacy session code if needed, 
-// but the wrappers above are cleaner.
-pub fn seal(
-    key: &GuardedKey32,
-    nonce: &[u8; NONCE_LEN],
-    plaintext: &[u8],
-    aad: &[u8],
-    dst: &mut [u8],
-) -> Result<(), ()> {
-    encrypt(key, nonce, plaintext, aad, dst).map(|_| ())
-}
+    // Split ciphertext and tag
+    dst[..pt_len].copy_from_slice(&ciphertext[..pt_len]);
+    let tag = aes_gcm::Tag::from_slice(&ciphertext[pt_len..]);
 
-pub fn open(
-    key: &GuardedKey32,
-    nonce: &[u8; NONCE_LEN],
-    ciphertext: &[u8],
-    aad: &[u8],
-    dst: &mut [u8],
-) -> bool {
-    decrypt(key, nonce, ciphertext, aad, dst).is_ok()
+    match cipher.decrypt_in_place_detached(
+        nonce,
+        aad,
+        &mut dst[..pt_len],
+        tag,
+    ) {
+        Ok(_) => Ok(pt_len),
+        Err(_) => Err(()),
+    }
 }
