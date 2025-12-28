@@ -42,13 +42,13 @@ Cause:
 
 Fix:
 ```properties
-android.aapt2FromMavenOverride=$PREFIX/bin/aapt2
+android.aapt2FromMavenOverride=$PREFIX/bin/aapt2'''
 
 ### 3. Do NOT hardcode clang paths
 
 # Bad:
 
-export CC=$ANDROID_NDK_HOME/.../linux-x86_64/clang
+'''export CC=$ANDROID_NDK_HOME/.../linux-x86_64/clang'''
 
 # Correct:
 
@@ -60,12 +60,13 @@ Use .cargo/config.toml only
 
 Symptoms:
 
-D8 crashes
+'''D8 crashes
 Gradle toolchain mismatch
 Use:
-OpenJDK 17 only
+OpenJDK 17 only'''
 
 ## ✅ What Is Safe
+
 ✔ Termux clang
 ✔ Termux aapt2
 ✔ Android SDK from Termux repo
@@ -73,21 +74,23 @@ OpenJDK 17 only
 ✔ llvm-nm -D for symbol audits
 
 ## 🔐 RCXCloud-Specific Rules
+
 Secure Core owns JNI
 feature = "android" must be explicit
 No cloud SDKs in core
 No NDK auto-detection via Gradle
+
 ##JNI symbols audited via:
 
-llvm-nm -D librcxcore.so | grep Java_
+'''llvm-nm -D librcxcore.so | grep Java_'''
 
 ##🧪 Verified JNI Exports
 
-Java_com_rcxcloud_core_SecureCore_unlockWithPhrase
+'''Java_com_rcxcloud_core_SecureCore_unlockWithPhrase
 Java_com_rcxcloud_core_SecureCore_lock
 Java_com_rcxcloud_core_SecureCore_isKilled
 Java_com_rcxcloud_core_SecureCore_encryptChunk
-Java_com_rcxcloud_core_SecureCore_decryptChunk
+Java_com_rcxcloud_core_SecureCore_decryptChunk'''
 
 ### 📌 Final Notes
 
