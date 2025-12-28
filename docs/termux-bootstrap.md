@@ -41,7 +41,8 @@ Cause:
 - Gradle downloads x86 aapt2
 
 Fix:
-```properties
+
+'''properties
 android.aapt2FromMavenOverride=$PREFIX/bin/aapt2'''
 
 ### 3. Do NOT hardcode clang paths
