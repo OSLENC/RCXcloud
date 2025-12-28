@@ -1,3 +1,13 @@
+
+3️⃣ docs/termux-bootstrap.md
+
+Below is ready-to-commit content.
+
+
+---
+
+📘 docs/termux-bootstrap.md
+
 # RCXCloud Termux Bootstrap Guide
 
 This document records the **canonical, battle-tested process**
@@ -22,6 +32,7 @@ for building RCXCloud Secure Core + Android JNI apps inside Termux.
 
 ### 1. Do NOT use Linux x86 Android NDK
 Symptoms:
+
 clang: cannot execute binary file: Exec format error
 
 Cause:
@@ -35,38 +46,53 @@ Fix:
 
 ### 2. Do NOT let Gradle download aapt2
 Symptoms:
+
 aapt2: Syntax error: Unterminated quoted string
 
 Cause:
 - Gradle downloads x86 aapt2
 
 Fix:
+```properties
+android.aapt2FromMavenOverride=$PREFIX/bin/aapt2
 
-'''properties
-android.aapt2FromMavenOverride=$PREFIX/bin/aapt2'''
 
-### 3. Do NOT hardcode clang paths
+---
 
-# Bad:
+3. Do NOT hardcode clang paths
 
-'''export CC=$ANDROID_NDK_HOME/.../linux-x86_64/clang'''
+Bad:
 
-# Correct:
+export CC=$ANDROID_NDK_HOME/.../linux-x86_64/clang
+
+Correct:
 
 Let Cargo use Termux clang
 
 Use .cargo/config.toml only
 
-### 4. Do NOT use Java 21
+
+
+---
+
+4. Do NOT use Java 21
 
 Symptoms:
 
-'''D8 crashes
-Gradle toolchain mismatch
-Use:
-OpenJDK 17 only'''
+D8 crashes
 
-## ✅ What Is Safe
+Gradle toolchain mismatch
+
+
+Use:
+
+OpenJDK 17 only
+
+
+
+---
+
+✅ What Is Safe
 
 ✔ Termux clang
 ✔ Termux aapt2
@@ -74,30 +100,43 @@ OpenJDK 17 only'''
 ✔ JNI inside Secure Core (feature-gated)
 ✔ llvm-nm -D for symbol audits
 
-## 🔐 RCXCloud-Specific Rules
+
+---
+
+🔐 RCXCloud-Specific Rules
 
 Secure Core owns JNI
+
 feature = "android" must be explicit
+
 No cloud SDKs in core
+
 No NDK auto-detection via Gradle
 
-##JNI symbols audited via:
+JNI symbols audited via:
 
-'''llvm-nm -D librcxcore.so | grep Java_'''
+llvm-nm -D librcxcore.so | grep Java_
 
-##🧪 Verified JNI Exports
 
-'''Java_com_rcxcloud_core_SecureCore_unlockWithPhrase
+
+---
+
+🧪 Verified JNI Exports
+
+Java_com_rcxcloud_core_SecureCore_unlockWithPhrase
 Java_com_rcxcloud_core_SecureCore_lock
 Java_com_rcxcloud_core_SecureCore_isKilled
 Java_com_rcxcloud_core_SecureCore_encryptChunk
-Java_com_rcxcloud_core_SecureCore_decryptChunk'''
+Java_com_rcxcloud_core_SecureCore_decryptChunk
 
-### 📌 Final Notes
+
+---
+
+📌 Final Notes
 
 Bootstrap scripts are idempotent
+
 All failures encountered are documented here
+
 This guide is authoritative unless superseded by a security review
-
-
 
