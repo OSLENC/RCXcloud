@@ -1,13 +1,3 @@
-
-3️⃣ docs/termux-bootstrap.md
-
-Below is ready-to-commit content.
-
-
----
-
-📘 docs/termux-bootstrap.md
-
 # RCXCloud Termux Bootstrap Guide
 
 This document records the **canonical, battle-tested process**
@@ -53,7 +43,7 @@ Cause:
 - Gradle downloads x86 aapt2
 
 Fix:
-```properties
+properties
 android.aapt2FromMavenOverride=$PREFIX/bin/aapt2
 
 
